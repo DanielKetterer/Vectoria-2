@@ -40,14 +40,29 @@ export function drawWorld(ctx, world) {
   }
 }
 
-// Markers for held sources so multiple fingers/players can see their own.
+export const PLAYER_COLORS = ['rgba(255,255,255,0.95)', 'rgba(255,150,40,0.95)'];
+
+// Markers for held sources so multiple fingers/players can see their own:
+// ring color = player, + for left button, - for right.
 export function drawSources(ctx, sources) {
   for (const s of sources) {
     if (!s.held) continue;
-    ctx.strokeStyle = s.button === 3 ? 'rgba(80,160,255,0.95)' : 'rgba(255,255,255,0.95)';
-    ctx.lineWidth = 2;
+    const col = PLAYER_COLORS[s.player || 0] || PLAYER_COLORS[0];
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.arc(s.x, s.y, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 14, 0, Math.PI * 2);
+    ctx.moveTo(s.x - 6, s.y);
+    ctx.lineTo(s.x + 6, s.y);
+    if (s.button !== 3) {
+      ctx.moveTo(s.x, s.y - 6);
+      ctx.lineTo(s.x, s.y + 6);
+    }
     ctx.stroke();
   }
 }

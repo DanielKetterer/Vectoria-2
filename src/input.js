@@ -10,6 +10,7 @@ export class PointerSources {
     this.byId = new Map();   // pointerId -> source
     this.touchButton = 1;    // touch has no right button; a toggle picks 1 or 3
     this.enabled = false;
+    this.player = 0;         // 0 = solo/host, 1 = guest (ring color)
     this.listeners = [];     // UI click handlers when not in play
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -48,6 +49,7 @@ export class PointerSources {
     try { this.canvas.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
     this.byId.set(e.pointerId, {
       id: e.pointerId,
+      player: this.player,
       kind: e.pointerType,
       x, y,
       button,

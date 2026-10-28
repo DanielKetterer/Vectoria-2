@@ -1,8 +1,8 @@
 # Vectoria 2
 
-A browser port of [Vectoria](https://github.com/DanielKetterer/Vectoria), the vector-field puzzle game. It's plain JavaScript and Canvas 2D, with no build step and no dependencies.
+A browser port of [Vectoria](https://github.com/DanielKetterer/Vectoria), the vector-field puzzle game. It's plain JavaScript and Canvas 2D, with no build step. The only dependency is [Trystero](https://github.com/dmotz/trystero), which loads from a CDN, and only when you open Multiplayer.
 
-Push, pull and spin a field of dots into the goal zones. You use divergence in Push-Pull zones and curl in Spin zones, and you avoid the traps.
+Push, pull and spin a field of dots into the goal zones. You use divergence in Push-Pull zones and curl in Spin zones, and you avoid the traps. You can play alone, or with a partner on another device in co-op.
 
 ## Run it
 
@@ -31,9 +31,36 @@ The game will be live at `https://danielketterer.github.io/Vectoria-2/` a minute
 | `V` / `H` / `C` | Toggle the vector, divergence and curl overlays |
 | `N` | Next level, after completing one |
 | `R` | Restart |
-| `Esc` / `Q` | Back to menu |
+| `Esc` / `Q` | Back to menu (in multiplayer: host to lobby, guest leaves) |
 
 Beating all five levels unlocks Level Select. Best times, stars and the unlock are saved in the browser's localStorage.
+
+## Multiplayer (co-op)
+
+Choose **3. Multiplayer** from the menu.
+
+1. **The host** picks *Host a game*. They get a 4-character room code and an invite link.
+2. **The partner** either opens the invite link, or picks *Join a game* and types the code.
+3. The host picks a level. The host can also start before the partner arrives; a late joiner drops straight into the current level.
+
+Both players act on the same dots at the same time, and their fields add together. You can see each other's cursors: the host is white and the guest is orange, with **+** for left/push and **-** for right/pull. Either player can press **N** (next) or **R** (restart). Esc returns the host to the lobby and takes the guest out of the game. Co-op runs don't change the solo high scores.
+
+### How it works without a server
+
+- **Host-authoritative simulation.** The host runs the only simulation and feeds it both players' force sources. The guest sends its pointer input (about 30 times a second, a few dozen bytes each). The host streams back a binary snapshot of the dots (about 30 times a second, roughly 4 KB each). The guest draws those snapshots, smoothing between the last two, and draws its own cursor locally so it feels instant.
+- **Peer-to-peer connection.** Players connect directly over WebRTC data channels. Trystero handles the one-time handshake through public Nostr relays. After that, game traffic goes straight between the two browsers. There's no account, no API key, and no server of our own; GitHub Pages serves the static files.
+- **The one weak spot is restrictive networks.** On some corporate, school or cellular networks, two browsers can't connect directly. That case needs a TURN relay server: add a `turnConfig` to the `joinRoom` call in `src/net/transport.js`. Cloudflare offers TURN with a free tier.
+
+### Testing on one machine
+
+Add `?net=local` to the URL. Multiplayer then connects tabs within the same browser using `BroadcastChannel`, with no network involved. Open the host in one tab and the invite link in another.
+
+The protocol was tested end to end in headless Chromium two ways:
+
+- **Over `BroadcastChannel`:** lobby, invite link, typed code, simultaneous input from both players, quick taps, next/restart from either side, the shared win screen, a third player being turned away, and either player leaving.
+- **Over real Trystero/WebRTC:** two separate browser profiles connected through the public relays.
+
+Both tests ran on one machine, so cross-network NAT traversal still needs a real-world try.
 
 ## Layout
 
@@ -46,7 +73,9 @@ src/input.js        Pointer Events -> force sources (mouse, each finger, pen)
 src/render.js       world, overlays, HUD, buttons
 src/effects.js      win-screen fireworks and confetti
 src/storage.js      localStorage scores and unlock
-src/main.js         loop + screen state machine
+src/main.js         loop + screen state machine, multiplayer session (host/guest)
+src/net/transport.js  Trystero (WebRTC) and BroadcastChannel transports, one interface
+src/net/snapshot.js   binary world snapshots + the guest's interpolated view
 assets/levels/      level1-5.png, tutorial1-2.png (unchanged from the original)
 assets/textures/    zone textures (unchanged)
 ```
@@ -71,7 +100,7 @@ The physics is a line-for-line port. A headless test drove the same held input t
 
 - **Fixed timestep.** The simulation runs at 60 ticks/sec whatever the monitor's refresh rate. Before, physics advanced once per rendered frame.
 - **One impulse per source per tick.** The original applied force in the mouse-motion handler *and* in the per-frame drag block. Moving the mouse therefore pushed harder than holding still. Now position only sets *where* the force acts, not how much of it there is.
-- **Multiple sources superpose.** Input is a list of sources, one per active pointer, and their fields add. Two fingers on a tablet already give two-player local co-op. This list is also where networked players will plug in.
+- **Multiple sources superpose.** Input is a list of sources, one per active pointer, and their fields add. Two fingers on a tablet already give two-player local co-op. Networked players plug into the same list.
 - **Quick taps always register.** A click shorter than one tick still applies one impulse.
 - **The motion-event crash is gone.** `play_state.py` read `evt.button` on `MOUSEMOTION` events, which don't have that attribute. That raised an AttributeError when dragging through a yellow zone.
 - **Times are simulated time** (ticks / 60), not wall-clock. They're fair across machines, and a backgrounded tab doesn't run up the timer.
@@ -82,11 +111,8 @@ The physics is a line-for-line port. A headless test drove the same held input t
 
 Star thresholds default to `[2, 5, 10]` seconds for every level. That's what the Python game fell back to, since `stars.csv` was never committed. Tune them per level in `src/config.js`.
 
-The sandbox / level editor (`combined2.py`) isn't ported yet.
+## Ideas not built yet
 
-## Next: networked two-player
-
-`src/physics.js` has no DOM dependencies, and `World.step(sources)` takes plain `{x, y, button, held}` objects. A remote player's input can be fed in exactly like a local finger. The planned path is:
-
-1. A host/guest protocol over `BroadcastChannel`, tested in two tabs with no network.
-2. The same protocol over WebRTC data channels, with free serverless signaling (Trystero or PeerJS).
+- **Versus mode.** This needs a second goal color in the level PNGs, one goal per player, plus a new win rule.
+- **More than two players.** The source list already handles any number of players. The lobby and protocol assume one guest.
+- **The sandbox / level editor** from `combined2.py`.

@@ -27,10 +27,55 @@
       -webkit-touch-callout: none;
       cursor: crosshair;
     }
+    /* Room-code entry: a real input so phone keyboards work. Sits over the canvas. */
+    #joinForm {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font: 600 18px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    #joinForm[hidden] { display: none; }
+    #joinCode {
+      width: 5.2em;
+      padding: 10px 12px;
+      font: 800 32px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      text-align: center;
+      color: rgb(255, 215, 0);
+      background: #111;
+      border: 2px solid rgba(255, 255, 255, 0.5);
+      border-radius: 10px;
+      outline: none;
+    }
+    #joinCode:focus { border-color: rgb(255, 215, 0); }
+    #joinForm button {
+      padding: 12px 18px;
+      font: inherit;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.12);
+      border: 2px solid rgba(255, 255, 255, 0.5);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    #joinForm button[type=submit] {
+      color: #000;
+      background: rgb(255, 215, 0);
+      border-color: rgb(255, 215, 0);
+    }
   </style>
 </head>
 <body>
   <canvas id="game" width="800" height="600"></canvas>
+  <form id="joinForm" hidden autocomplete="off">
+    <input id="joinCode" maxlength="4" inputmode="text" autocapitalize="characters" spellcheck="false" aria-label="Room code" placeholder="ABCD">
+    <button type="submit">Join</button>
+    <button type="button" id="joinBack">Back</button>
+  </form>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>
