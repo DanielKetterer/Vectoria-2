@@ -97,3 +97,12 @@ export function computeStars(elapsedS, level) {
   if (elapsedS < t1) return 1;
   return 0;
 }
+
+// Optional TURN relays for online play. Leave empty to connect directly
+// (works on most home Wi-Fi). Some networks, notably many cellular carriers,
+// block direct connections; a TURN server relays the traffic then. Free
+// tiers exist (e.g. Metered's Open Relay, Cloudflare); paste the entries
+// your provider gives you, e.g.
+//   { urls: 'turn:relay.example.com:443?transport=tcp', username: '...', credential: '...' }
+// These credentials end up in public page source, so use ones scoped for that.
+export const TURN_SERVERS = [];

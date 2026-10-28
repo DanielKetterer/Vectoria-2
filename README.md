@@ -68,9 +68,26 @@ Balance note, measured: the fields don't weaken with distance, so one player pul
 - **Peer-to-peer connection.** Players connect directly over WebRTC data channels. Trystero handles the one-time handshake through public Nostr relays. After that, game traffic goes straight between the two browsers. There's no account, no API key, and no server of our own; GitHub Pages serves the static files.
 - **The one weak spot is restrictive networks.** On some corporate, school or cellular networks, two browsers can't connect directly. That case needs a TURN relay server: add a `turnConfig` to the `joinRoom` call in `src/net/transport.js`. Cloudflare offers TURN with a free tier.
 
-### Testing on one machine
+### Playing both sides on one machine
 
-Add `?net=local` to the URL. Multiplayer then connects tabs within the same browser using `BroadcastChannel`, with no network involved. Open the host in one tab and the invite link in another. Switching tabs is fine: the simulation clock runs in a Web Worker, so the host keeps simulating while its tab is in the background.
+Open the host in one tab and the invite link (or the code) in another tab of the **same browser**. Every session listens on two paths at once:
+
+- a `BroadcastChannel` between same-browser tabs, which works instantly, even offline
+- the WebRTC peer-to-peer path, for other devices
+
+Whichever path reaches the other player first is used. Each page carries a session id, so a tab reachable on both paths still counts as one player.
+
+Switching tabs is fine. The simulation clock runs in a Web Worker, so the host keeps simulating while its tab is in the background.
+
+The old `?net=local` switch is retired; it's ignored and stripped from the URL.
+
+### If a second device can't join
+
+The connecting screen and the host lobby show a status line, e.g. "Online: 6/8 matchmaking relays connected". A failed join also explains which step failed:
+
+- **"Couldn't load the online-play library"**: that device can't reach cdn.jsdelivr.net.
+- **"Couldn't reach any of the matchmaking relays"**: that network blocks the public Nostr relays. Try another network.
+- **"The two networks are blocking a direct connection"**: both sides found the room, but the browsers couldn't open a direct link. This is common when one device is on cellular data. Put both devices on the same Wi-Fi, or add a TURN server to `TURN_SERVERS` in `src/config.js`; free tiers exist, e.g. Metered's Open Relay or Cloudflare.
 
 The protocol was tested end to end in headless Chromium two ways:
 

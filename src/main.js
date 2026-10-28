@@ -36,10 +36,12 @@ window.addEventListener('resize', resize);
 const input = new PointerSources(canvas);
 const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
 const params = new URLSearchParams(location.search);
-const NET_KIND = params.get('net') === 'local' ? 'local' : 'p2p';
+// Identifies this page to the other player. The same tab can be reachable
+// over two paths (same-browser channel and P2P); this keeps it one player.
+const SESSION_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 const NET_EVERY = 2;               // send snapshots / inputs every 2 ticks (30 Hz)
-const CONNECT_TIMEOUT_MS = 25000;  // guest gives up finding the host after this
+const CONNECT_TIMEOUT_MS = 30000;  // guest gives up finding the host after this
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 
 const TUTORIAL_PAGES = [
@@ -242,7 +244,6 @@ function shareLink(room) {
   u.search = '';
   u.hash = '';
   u.searchParams.set('join', room);
-  if (NET_KIND === 'local') u.searchParams.set('net', 'local');
   return u.toString();
 }
 
@@ -263,52 +264,51 @@ function leaveSession() {
   try { n.t.leave(); } catch (_) { /* ignore */ }
 }
 
-async function hostStart() {
+function hostStart() {
   const room = makeRoomCode();
-  const token = ++S.sessionToken;
-  S.screen = 'connecting';
-  S.connectingMsg = 'Opening a room...';
-  let t;
-  try {
-    t = await createTransport(NET_KIND, room);
-  } catch (err) {
-    console.error(err);
-    if (token === S.sessionToken) failSession(`Couldn't start multiplayer (${err.message || err}). Check your connection and try again.`);
-    return;
-  }
-  if (token !== S.sessionToken) { t.leave(); return; } // cancelled while connecting
-  S.net = { role: 'host', t, room, partner: null, gen: 0, remote: new Map(), copied: false, matchMode: 'coop' };
+  ++S.sessionToken;
+  const t = createTransport(room);
+  S.net = {
+    role: 'host', t, room, partner: null, partnerSid: null, gen: 0, remote: new Map(),
+    copied: false, matchMode: 'coop',
+  };
   input.player = 1;
 
-  t.onJoin = (peer) => {
-    const n = S.net;
-    if (!n || n.t !== t) return;
-    if (n.partner && n.partner !== peer) {
-      t.sendCtl({ t: 'full' }, peer);
-      return;
-    }
-    n.partner = peer;
-    t.sendCtl({ t: 'welcome', room }, peer);
-    // Late join: bring the guest straight into whatever is happening.
-    if (S.screen === 'play' || S.screen === 'loading') sendLoad();
-    else if (S.screen === 'won') t.sendCtl({ t: 'won' }, peer);
-  };
-  t.onLeave = (peer) => {
-    const n = S.net;
-    if (!n || n.t !== t || peer !== n.partner) return;
-    n.partner = null;
-    n.remote.clear();
-    n.partnerLeft = true;
-    if (S.screen === 'play' || S.screen === 'won' || S.screen === 'loading') hostToLobby();
-  };
+  // Guests announce themselves with a hello carrying their session id. The
+  // first one becomes the partner; the same guest arriving over the other
+  // path is ignored; anyone else is told the room is full.
   t.onCtl = (m, from) => {
     const n = S.net;
-    if (!n || n.t !== t || from !== n.partner || !m) return;
+    if (!n || n.t !== t || !m) return;
+    if (m.t === 'hello') {
+      if (!n.partner) {
+        n.partner = from;
+        n.partnerSid = m.sid;
+        n.partnerLeft = false;
+        t.sendCtl({ t: 'welcome', room }, from);
+        // Late join: bring the guest straight into whatever is happening.
+        if (S.screen === 'play' || S.screen === 'loading') sendLoad();
+        else if (S.screen === 'won') t.sendCtl({ t: 'won' }, from);
+      } else if (m.sid !== n.partnerSid) {
+        t.sendCtl({ t: 'full' }, from);
+      }
+      return;
+    }
+    if (from !== n.partner) return;
     if (m.t === 'input') applyRemoteInput(m.s);
     else if (m.t === 'cmd' && S.screen === 'play' && S.world) {
       if (m.c === 'next' && S.world.completed) nextLevel();
       else if (m.c === 'restart') restartLevel();
     }
+  };
+  t.onLeave = (peer) => {
+    const n = S.net;
+    if (!n || n.t !== t || peer !== n.partner) return;
+    n.partner = null;
+    n.partnerSid = null;
+    n.remote.clear();
+    n.partnerLeft = true;
+    if (S.screen === 'play' || S.screen === 'won' || S.screen === 'loading') hostToLobby();
   };
   hostToLobby();
 }
@@ -355,33 +355,28 @@ function applyRemoteInput(list) {
   for (const [id, s] of n.remote) if (!seen.has(id)) s.held = false;
 }
 
-async function guestJoin(rawRoom) {
+function guestJoin(rawRoom) {
   const room = String(rawRoom || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (room.length !== 4) {
     S.joinError = 'Room codes are 4 characters.';
     return;
   }
   hideJoinForm();
-  const token = ++S.sessionToken;
+  ++S.sessionToken;
   S.screen = 'connecting';
   S.connectingMsg = `Looking for room ${room}...`;
-  let t;
-  try {
-    t = await createTransport(NET_KIND, room);
-  } catch (err) {
-    console.error(err);
-    if (token === S.sessionToken) failSession(`Couldn't start multiplayer (${err.message || err}). Check your connection and try again.`);
-    return;
-  }
-  if (token !== S.sessionToken) { t.leave(); return; } // cancelled while connecting
-  S.net = { role: 'guest', t, room, partner: null, pendingSnap: null, sentEmpty: true };
+  const t = createTransport(room);
+  S.net = { role: 'guest', t, room, partner: null, pendingSnap: null, sentEmpty: true, startedAt: performance.now() };
   input.player = 2;
   S.net.timer = setTimeout(() => {
-    if (S.net && S.net.t === t && !S.net.partner) {
-      failSession(`Couldn't find room ${room}. Check the code, and that the host is still in the lobby.`);
-    }
+    if (S.net && S.net.t === t && !S.net.partner) failSession(connectFailMessage(room, t.status()));
   }, CONNECT_TIMEOUT_MS);
 
+  // Say hello to every peer we can see (over either path); the host replies
+  // with welcome (or full).
+  t.onJoin = (peer) => {
+    if (S.net && S.net.t === t && !S.net.partner) t.sendCtl({ t: 'hello', sid: SESSION_ID }, peer);
+  };
   t.onCtl = (m, from) => {
     const n = S.net;
     if (!n || n.t !== t || !m) return;
@@ -413,6 +408,28 @@ async function guestJoin(rawRoom) {
     if (!n || n.t !== t || peer !== n.partner) return;
     failSession('The host left the game.');
   };
+}
+
+// Explain a failed join in terms of what actually went wrong.
+function connectFailMessage(room, st) {
+  if (st.p2p === 'error') {
+    return `Couldn't load the online-play library (${st.error}). Check this device's internet connection.`;
+  }
+  if (st.relaysOpen === 0) {
+    return `Couldn't reach any of the matchmaking relays from this device, so it can't find room ${room}. The network may be blocking them; try another network.`;
+  }
+  return `Couldn't connect to room ${room}. Check the code and that the host is still in the lobby. `
+    + 'If the code is right, the two networks are blocking a direct connection (common on cellular data): put both devices on the same Wi-Fi and try again.';
+}
+
+// One line of connection health for the lobby and connecting screens.
+function netStatusLine(t) {
+  if (!t) return '';
+  const st = t.status();
+  if (st.p2p === 'loading') return 'Starting online play...';
+  if (st.p2p === 'error') return `Online play unavailable: ${st.error}`;
+  if (!st.relaysTotal) return 'Online: starting relays...';
+  return `Online: ${st.relaysOpen}/${st.relaysTotal} matchmaking relays connected`;
 }
 
 async function guestLoad(m) {
@@ -705,9 +722,6 @@ function draw(now) {
       b.host = button(ctx, 'H.  Host a game', MAP_W / 2, 260, { w: 300 });
       b.join = button(ctx, 'J.  Join a game', MAP_W / 2, 325, { w: 300 });
       b.back = button(ctx, 'Back', 80, MAP_H - 40, { w: 120, h: 38, size: 18 });
-      if (NET_KIND === 'local') {
-        text(ctx, 'Test mode: connects tabs in this browser only', MAP_W / 2, MAP_H - 40, { size: 14, color: '#888' });
-      }
       break;
     }
     case 'join':
@@ -718,8 +732,12 @@ function draw(now) {
       break;
     case 'connecting':
       blank();
-      text(ctx, S.connectingMsg || 'Connecting...', MAP_W / 2, MAP_H / 2 - 20, { size: 28 });
-      text(ctx, 'This can take a few seconds.', MAP_W / 2, MAP_H / 2 + 20, { size: 16, color: '#aaa' });
+      text(ctx, S.connectingMsg || 'Connecting...', MAP_W / 2, MAP_H / 2 - 30, { size: 28 });
+      text(ctx, 'This can take a few seconds.', MAP_W / 2, MAP_H / 2 + 8, { size: 16, color: '#aaa' });
+      if (S.net) {
+        const secs = Math.floor((performance.now() - S.net.startedAt) / 1000);
+        text(ctx, `${netStatusLine(S.net.t)}   (${secs}s)`, MAP_W / 2, MAP_H / 2 + 36, { size: 14, color: '#888' });
+      }
       b.back = button(ctx, 'Cancel', MAP_W / 2, MAP_H / 2 + 90, { w: 160, h: 40, size: 18 });
       break;
     case 'hostLobby':
@@ -823,7 +841,8 @@ function drawHostLobby() {
   if (n && n.partner) { status = 'Partner connected! You are Orange, they are Violet.'; color = PLAYER_COLORS[2]; }
   else if (n && n.partnerLeft) { status = 'Your partner left. Waiting for someone to join...'; color = 'rgb(255,140,140)'; }
   else { status = 'Waiting for a partner to join... (you can start without them)'; color = '#ccc'; }
-  text(ctx, status, MAP_W / 2, 296, { size: 18, color });
+  text(ctx, status, MAP_W / 2, 282, { size: 18, color });
+  if (n) text(ctx, netStatusLine(n.t), MAP_W / 2, 303, { size: 12, color: '#888' });
 
   const versus = n && n.matchMode === 'versus';
   b.coop = button(ctx, 'Co-op', MAP_W / 2 - 75, 340, { w: 140, h: 40, size: 18, active: !versus });
@@ -1010,6 +1029,14 @@ function startClock() {
   }
 }
 startClock();
+
+// ?net=local is retired (every session now covers same-browser tabs too);
+// drop it from old links so nobody gets a confusing URL.
+if (params.has('net')) {
+  const u = new URL(location.href);
+  u.searchParams.delete('net');
+  history.replaceState(null, '', u.toString());
+}
 
 // An invite link (?join=ABCD) drops straight into the room.
 const inviteRoom = params.get('join');
