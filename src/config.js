@@ -106,3 +106,8 @@ export function computeStars(elapsedS, level) {
 //   { urls: 'turn:relay.example.com:443?transport=tcp', username: '...', credential: '...' }
 // These credentials end up in public page source, so use ones scoped for that.
 export const TURN_SERVERS = [];
+
+// Or a URL that returns a list of ICE servers as JSON, fetched each time a
+// session starts. Metered's free plan gives one meant for front-end use:
+//   'https://<your-app>.metered.live/api/v1/turn/credentials?apiKey=<credential api key>'
+export const TURN_CREDENTIALS_URL = '';

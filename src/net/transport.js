@@ -15,13 +15,16 @@
 //   t.onSnap = (buffer, from) => {}
 //   t.onJoin = (peerId) => {}
 //   t.onLeave = (peerId) => {}
-//   t.status() -> { p2p: 'loading'|'ready'|'error', relaysOpen, relaysTotal, error }
+//   t.status() -> { p2p: 'loading'|'ready'|'error', relaysOpen, relaysTotal, error,
+//                   directFailures, directError, turn }
+//     directFailures counts peers that found us through the relays but whose
+//     direct WebRTC link then failed (the case a TURN relay fixes).
 //   t.leave()
 //
 // The same other tab can be reachable on both paths; the session layer
 // de-duplicates players by a per-page session id, not by peer id.
 
-import { TURN_SERVERS } from '../config.js';
+import { TURN_SERVERS, TURN_CREDENTIALS_URL } from '../config.js';
 
 const APP_ID = 'vectoria-2.danielketterer.github.io';
 const TRYSTERO_URL = 'https://cdn.jsdelivr.net/npm/trystero@0.26.0/+esm';
@@ -32,7 +35,7 @@ const noop = () => {};
 export function createTransport(room) {
   const t = { onCtl: noop, onSnap: noop, onJoin: noop, onLeave: noop };
   const paths = {};
-  const p2pState = { p2p: 'loading', error: '' };
+  const p2pState = { p2p: 'loading', error: '', directFailures: 0, directError: '', turn: 'none' };
 
   const attach = (name, path) => {
     paths[name] = path;
@@ -73,7 +76,7 @@ export function createTransport(room) {
   // Attach handlers first, announce on the next turn (callers set onJoin etc.
   // synchronously after this returns).
   attach('local', localPath(room));
-  p2pPath(room).then((p) => {
+  p2pPath(room, p2pState).then((p) => {
     if (left) { p.leave(); return; }
     attach('p2p', p);
     p2pState.p2p = 'ready';
@@ -86,13 +89,43 @@ export function createTransport(room) {
   return t;
 }
 
-async function p2pPath(room) {
+// TURN relays: static entries from config, plus short-lived ones fetched
+// from a credentials URL (e.g. Metered's free plan) when configured.
+async function turnServers(state) {
+  const list = [...TURN_SERVERS];
+  if (TURN_CREDENTIALS_URL) {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 4000);
+      const res = await fetch(TURN_CREDENTIALS_URL, { signal: ctl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const servers = await res.json();
+      if (Array.isArray(servers)) list.push(...servers.filter((x) => x && x.urls));
+    } catch (err) {
+      console.warn('TURN credentials fetch failed; continuing without them', err);
+      state.turn = 'fetch failed';
+    }
+  }
+  if (list.some((x) => String(x.urls).includes('turn'))) state.turn = 'on';
+  return list;
+}
+
+async function p2pPath(room, state) {
   // Loaded only when someone actually opens multiplayer, so single-player
   // never depends on the CDN.
-  const trystero = await import(TRYSTERO_URL);
+  const [trystero, turn] = await Promise.all([import(TRYSTERO_URL), turnServers(state)]);
   const config = { appId: APP_ID, relayConfig: { redundancy: RELAY_REDUNDANCY } };
-  if (TURN_SERVERS.length) config.turnConfig = TURN_SERVERS;
-  const r = trystero.joinRoom(config, `room-${room}`);
+  if (turn.length) config.turnConfig = turn;
+  const r = trystero.joinRoom(config, `room-${room}`, {
+    // Fires when a peer found us via the relays and exchanged offers, but
+    // the direct connection could not be opened (or the handshake failed).
+    onJoinError: (d) => {
+      state.directFailures++;
+      state.directError = String((d && d.error) || 'connection failed');
+      console.warn('Peer connection failed:', d);
+    },
+  });
   const p = { onCtl: noop, onSnap: noop, onJoin: noop, onLeave: noop };
   const ctl = r.makeAction('ctl');
   const snap = r.makeAction('snap');

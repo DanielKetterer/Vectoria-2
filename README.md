@@ -87,7 +87,13 @@ The connecting screen and the host lobby show a status line, e.g. "Online: 6/8 m
 
 - **"Couldn't load the online-play library"**: that device can't reach cdn.jsdelivr.net.
 - **"Couldn't reach any of the matchmaking relays"**: that network blocks the public Nostr relays. Try another network.
-- **"The two networks are blocking a direct connection"**: both sides found the room, but the browsers couldn't open a direct link. This is common when one device is on cellular data. Put both devices on the same Wi-Fi, or add a TURN server to `TURN_SERVERS` in `src/config.js`; free tiers exist, e.g. Metered's Open Relay or Cloudflare.
+- **"Never heard from room ... on the relays"**: the two pages never met. Check the code, and refresh both devices so they run the same version.
+- **"Found room ..., but the two devices couldn't open a direct connection"**: matchmaking worked, but the network blocked the direct WebRTC link. This happens on cellular data, and on Wi-Fi that isolates devices or can't route back to itself. The host lobby shows these failures too. The fix is a TURN relay. To set one up:
+  1. Sign up for Metered's free plan at dashboard.metered.ca.
+  2. Create a TURN credential, then open its details and copy its **API key**. That key is meant for front-end use. Wait about 2 minutes before using it.
+  3. Set `TURN_CREDENTIALS_URL` in `src/config.js` to `https://<your-app>.metered.live/api/v1/turn/credentials?apiKey=<that key>`.
+
+  Traffic only goes through the relay when a direct link fails, so the free allowance goes a long way. Alternatively, paste static entries from any TURN provider into `TURN_SERVERS`.
 
 The protocol was tested end to end in headless Chromium two ways:
 

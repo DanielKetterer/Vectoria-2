@@ -418,8 +418,15 @@ function connectFailMessage(room, st) {
   if (st.relaysOpen === 0) {
     return `Couldn't reach any of the matchmaking relays from this device, so it can't find room ${room}. The network may be blocking them; try another network.`;
   }
-  return `Couldn't connect to room ${room}. Check the code and that the host is still in the lobby. `
-    + 'If the code is right, the two networks are blocking a direct connection (common on cellular data): put both devices on the same Wi-Fi and try again.';
+  if (st.directFailures > 0) {
+    const turn = st.turn === 'on' ? ' even through the TURN relay' : '';
+    return `Found room ${room}, but the two devices couldn't open a direct connection${turn}. `
+      + (st.turn === 'on'
+        ? 'Check the TURN settings in src/config.js.'
+        : 'Some networks block this (cellular, and Wi-Fi that isolates devices). A TURN relay fixes it: see TURN_CREDENTIALS_URL in src/config.js.');
+  }
+  return `Never heard from room ${room} on the relays. Check the code, that the host is still in the lobby, `
+    + 'and that both devices have the latest version of the page (refresh both).';
 }
 
 // One line of connection health for the lobby and connecting screens.
@@ -429,7 +436,9 @@ function netStatusLine(t) {
   if (st.p2p === 'loading') return 'Starting online play...';
   if (st.p2p === 'error') return `Online play unavailable: ${st.error}`;
   if (!st.relaysTotal) return 'Online: starting relays...';
-  return `Online: ${st.relaysOpen}/${st.relaysTotal} matchmaking relays connected`;
+  const turn = st.turn === 'on' ? ', TURN relay on' : st.turn === 'fetch failed' ? ', TURN fetch failed' : '';
+  const fails = st.directFailures ? `  |  ${st.directFailures} direct connection attempt(s) failed` : '';
+  return `Online: ${st.relaysOpen}/${st.relaysTotal} matchmaking relays connected${turn}${fails}`;
 }
 
 async function guestLoad(m) {
