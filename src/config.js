@@ -98,16 +98,21 @@ export function computeStars(elapsedS, level) {
   return 0;
 }
 
-// Optional TURN relays for online play. Leave empty to connect directly
-// (works on most home Wi-Fi). Some networks, notably many cellular carriers,
-// block direct connections; a TURN server relays the traffic then. Free
-// tiers exist (e.g. Metered's Open Relay, Cloudflare); paste the entries
-// your provider gives you, e.g.
-//   { urls: 'turn:relay.example.com:443?transport=tcp', username: '...', credential: '...' }
-// These credentials end up in public page source, so use ones scoped for that.
-export const TURN_SERVERS = [];
-
-// Or a URL that returns a list of ICE servers as JSON, fetched each time a
-// session starts. Metered's free plan gives one meant for front-end use:
-//   'https://<your-app>.metered.live/api/v1/turn/credentials?apiKey=<credential api key>'
+// TURN relays for online play. Without one, devices connect directly, which
+// works on most home networks but fails on some: many cellular carriers, and
+// routers that don't let two devices on the same Wi-Fi reach each other by
+// their public address. A TURN server relays the traffic in those cases
+// (it's only used when a direct connection fails, and stays encrypted).
+//
+// Easiest free option: Metered's Open Relay (20 GB/month). Sign up at
+// https://www.metered.ca/tools/openrelay/, create an app, and paste its
+// credentials URL here (it looks like
+// https://<yourapp>.metered.live/api/v1/turn/credentials?apiKey=...).
+// The page fetches short-lived TURN credentials from it when a game starts.
+// The API key is visible in page source; restrict it to your domain in the
+// Metered dashboard.
 export const TURN_CREDENTIALS_URL = '';
+
+// Or list TURN servers directly, e.g.
+//   { urls: 'turn:relay.example.com:3478', username: '...', credential: '...' }
+export const TURN_SERVERS = [];
