@@ -69,7 +69,8 @@ export class World {
     this.vx = new Float64Array(n);
     this.vy = new Float64Array(n);
 
-    this.tick = 0;            // simulated ticks since level start
+    this.tick = 0;            // simulated ticks since level start (keeps counting while dots settle)
+    this.clock = 0;           // ticks of live play: stops when the level completes or fails
     this.hasActed = false;    // win/lose checks start after the first action
     this.lastResolved = [];   // most recent sources that applied force (for overlays)
     this.completed = false;
@@ -138,6 +139,7 @@ export class World {
     }
 
     this.tick++;
+    if (!this.completed && !this.failed) this.clock = this.tick;
 
     if (this.versus) {
       this.checkVersus();

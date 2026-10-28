@@ -2,7 +2,7 @@
 // Float32 is plenty for rendering. Around 4 KB for a full level of dots.
 //
 // Layout (all float32):
-//   gen, tick, flags(1=completed, 2=failed, 4=versus), goalFraction,
+//   gen, clock, flags(1=completed, 2=failed, 4=versus), goalFraction,
 //   score1, score2, winner, timeLimitTicks,
 //   nSources, [x, y, button, player, held] * nSources,
 //   nResolved, [x, y, mode(0=div,1=curl), sign] * nResolved,
@@ -14,7 +14,7 @@ export function encodeSnapshot(gen, world, sources) {
   const f = new Float32Array(len);
   let k = 0;
   f[k++] = gen;
-  f[k++] = world.tick;
+  f[k++] = world.clock;
   f[k++] = (world.completed ? 1 : 0) | (world.failed ? 2 : 0) | (world.versus ? 4 : 0);
   f[k++] = world.goalFraction();
   f[k++] = world.score[1];
@@ -40,7 +40,7 @@ export function decodeSnapshot(buf) {
   const f = new Float32Array(buf);
   let k = 0;
   const gen = f[k++];
-  const tick = f[k++];
+  const clock = f[k++];
   const flags = f[k++];
   const goal = f[k++];
   const score = [0, f[k++], f[k++]];
@@ -63,7 +63,7 @@ export function decodeSnapshot(buf) {
     px[i] = f[k++]; py[i] = f[k++];
   }
   return {
-    gen, tick, completed: (flags & 1) !== 0, failed: (flags & 2) !== 0, versus: (flags & 4) !== 0,
+    gen, clock, completed: (flags & 1) !== 0, failed: (flags & 2) !== 0, versus: (flags & 4) !== 0,
     goal, score, winner, timeLimitTicks, sources, resolved, n, px, py,
   };
 }
@@ -77,7 +77,7 @@ export class GuestView {
     this.n = 0;
     this.px = new Float32Array(0);
     this.py = new Float32Array(0);
-    this.tick = 0;
+    this.clock = 0;
     this.completed = false;
     this.failed = false;
     this.goal = 0;
@@ -102,7 +102,7 @@ export class GuestView {
     this.prev = this.curr && this.curr.n === snap.n ? this.curr : snap;
     this.curr = snap;
     this.currAt = now;
-    this.tick = snap.tick;
+    this.clock = snap.clock;
     this.completed = snap.completed;
     this.failed = snap.failed;
     this.goal = snap.goal;

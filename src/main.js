@@ -662,7 +662,7 @@ function tick(nowMs) {
 function onComplete() {
   // Simulated time, not wall-clock: fair across frame rates and immune to a
   // backgrounded tab.
-  const time = S.world.tick / TICK_HZ;
+  const time = S.world.clock / TICK_HZ;
   if (S.mode === 'level' && !S.net) {
     const newBest = store.isNewBest(S.level, time);
     const stars = computeStars(time, S.level);
@@ -864,11 +864,11 @@ function drawPlay(now) {
 
   if (w.versus) {
     drawGoalLabels(w);
-    const left = Math.max(0, (w.timeLimitTicks - w.tick) / TICK_HZ);
+    const left = Math.max(0, (w.timeLimitTicks - w.clock) / TICK_HZ);
     const clock = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
     drawScoreboard(w, clock);
   } else {
-    const time = (w.tick / TICK_HZ).toFixed(1);
+    const time = (w.clock / TICK_HZ).toFixed(1);
     pill(ctx, `${levelLabel(S.mode, S.level)}   ${time}s   goal ${Math.round(w.goalFraction() * 100)}%`, 10, 10);
   }
   const on = (f) => (f ? 'on' : 'off');
@@ -891,7 +891,7 @@ function drawPlay(now) {
     panel(ctx);
     const title = S.mode === 'level' ? `Level ${S.level} Complete!` : `Tutorial level ${S.level} Complete!`;
     text(ctx, title, MAP_W / 2, MAP_H / 2 - 70, { size: 44, weight: 700 });
-    const t = w.tick / TICK_HZ;
+    const t = w.clock / TICK_HZ;
     if (S.mode === 'level') {
       const r = S.result;
       if (r && r.newBest) text(ctx, 'New High Score!', MAP_W / 2, MAP_H / 2 - 20, { size: 30, color: 'rgb(255,215,0)' });
