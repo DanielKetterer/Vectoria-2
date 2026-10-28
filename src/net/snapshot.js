@@ -2,20 +2,25 @@
 // Float32 is plenty for rendering. Around 4 KB for a full level of dots.
 //
 // Layout (all float32):
-//   gen, tick, flags(1=completed, 2=failed), goalFraction,
+//   gen, tick, flags(1=completed, 2=failed, 4=versus), goalFraction,
+//   score1, score2, winner, timeLimitTicks,
 //   nSources, [x, y, button, player, held] * nSources,
 //   nResolved, [x, y, mode(0=div,1=curl), sign] * nResolved,
 //   nDots, [x, y] * nDots
 
 export function encodeSnapshot(gen, world, sources) {
   const res = world.lastResolved;
-  const len = 4 + 1 + sources.length * 5 + 1 + res.length * 4 + 1 + world.n * 2;
+  const len = 8 + 1 + sources.length * 5 + 1 + res.length * 4 + 1 + world.n * 2;
   const f = new Float32Array(len);
   let k = 0;
   f[k++] = gen;
   f[k++] = world.tick;
-  f[k++] = (world.completed ? 1 : 0) | (world.failed ? 2 : 0);
+  f[k++] = (world.completed ? 1 : 0) | (world.failed ? 2 : 0) | (world.versus ? 4 : 0);
   f[k++] = world.goalFraction();
+  f[k++] = world.score[1];
+  f[k++] = world.score[2];
+  f[k++] = world.winner;
+  f[k++] = world.timeLimitTicks;
   f[k++] = sources.length;
   for (const s of sources) {
     f[k++] = s.x; f[k++] = s.y; f[k++] = s.button; f[k++] = s.player || 0; f[k++] = s.held ? 1 : 0;
@@ -38,6 +43,9 @@ export function decodeSnapshot(buf) {
   const tick = f[k++];
   const flags = f[k++];
   const goal = f[k++];
+  const score = [0, f[k++], f[k++]];
+  const winner = f[k++];
+  const timeLimitTicks = f[k++];
   const sources = [];
   const ns = f[k++];
   for (let i = 0; i < ns; i++) {
@@ -55,7 +63,8 @@ export function decodeSnapshot(buf) {
     px[i] = f[k++]; py[i] = f[k++];
   }
   return {
-    gen, tick, completed: (flags & 1) !== 0, failed: (flags & 2) !== 0, goal, sources, resolved, n, px, py,
+    gen, tick, completed: (flags & 1) !== 0, failed: (flags & 2) !== 0, versus: (flags & 4) !== 0,
+    goal, score, winner, timeLimitTicks, sources, resolved, n, px, py,
   };
 }
 
@@ -72,6 +81,10 @@ export class GuestView {
     this.completed = false;
     this.failed = false;
     this.goal = 0;
+    this.versus = map.isVersus;
+    this.score = [0, 0, 0];
+    this.winner = 0;
+    this.timeLimitTicks = 0;
     this.lastResolved = [];
     this.sources = [];
     this.prev = null;
@@ -93,6 +106,10 @@ export class GuestView {
     this.completed = snap.completed;
     this.failed = snap.failed;
     this.goal = snap.goal;
+    this.versus = snap.versus;
+    this.score = snap.score;
+    this.winner = snap.winner;
+    this.timeLimitTicks = snap.timeLimitTicks;
     this.lastResolved = snap.resolved;
     this.sources = snap.sources;
     if (this.n !== snap.n) {
@@ -116,5 +133,9 @@ export class GuestView {
 
   goalFraction() {
     return this.goal;
+  }
+
+  majority() {
+    return Math.floor(this.n / 2) + 1;
   }
 }

@@ -1,6 +1,6 @@
 // Drawing: world, field overlays, HUD, panels, menus.
 
-import { MAP_W, MAP_H, SAMPLE_STEP, COLORS, DOT_RADIUS } from './config.js';
+import { MAP_W, MAP_H, SAMPLE_STEP, COLORS, DOT_RADIUS, PLAYER_COLORS } from './config.js';
 import { fieldAt } from './physics.js';
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -40,7 +40,7 @@ export function drawWorld(ctx, world) {
   }
 }
 
-export const PLAYER_COLORS = ['rgba(255,255,255,0.95)', 'rgba(255,150,40,0.95)'];
+export { PLAYER_COLORS };
 
 // Markers for held sources so multiple fingers/players can see their own:
 // ring color = player, + for left button, - for right.

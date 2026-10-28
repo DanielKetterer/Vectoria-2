@@ -2,7 +2,7 @@
 // load into a zone id, so gameplay queries are a single array lookup instead
 // of the per-query tolerance comparisons the Python version did.
 
-import { MAP_W, MAP_H, TOLERANCE, Z, ZONE_COLORS } from './config.js';
+import { MAP_W, MAP_H, TOLERANCE, Z, ZONE_COLORS, PLAYER_COLORS } from './config.js';
 
 export function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -24,11 +24,33 @@ function imageData(img, w = img.width, h = img.height) {
 
 let textureCache = null;
 
+// Versus goal texture: a checkered flag in the player's color, so the two
+// goals read as "the same kind of thing" as the green goal but clearly owned.
+function flagTexture(color, dark) {
+  const c = document.createElement('canvas');
+  const sq = 16;
+  c.width = sq * 4;
+  c.height = sq * 4;
+  const g = c.getContext('2d');
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      g.fillStyle = (x + y) % 2 ? dark : color;
+      g.fillRect(x * sq, y * sq, sq, sq);
+    }
+  }
+  return c;
+}
+
+const GENERATED = {
+  [Z.GOAL_P1]: () => flagTexture(PLAYER_COLORS[1], 'rgb(70,35,0)'),
+  [Z.GOAL_P2]: () => flagTexture(PLAYER_COLORS[2], 'rgb(40,20,80)'),
+};
+
 export async function loadTextures() {
   if (textureCache) return textureCache;
   const entries = await Promise.all(
     ZONE_COLORS.map(async ([zone, , file]) => {
-      const img = await loadImage(`assets/textures/${file}`);
+      const img = file ? await loadImage(`assets/textures/${file}`) : GENERATED[zone]();
       return [zone, img];
     })
   );
@@ -51,6 +73,20 @@ export class LevelMap {
     this.h = MAP_H;
     this.zones = zones;       // Uint8Array(w*h)
     this.textured = textured; // canvas with the textured map
+
+    // Centroids of the two versus goals (for labels), and whether this map
+    // has any, which is what makes it a versus map.
+    const sum = { [Z.GOAL_P1]: [0, 0, 0], [Z.GOAL_P2]: [0, 0, 0] };
+    for (let i = 0; i < zones.length; i++) {
+      const s = sum[zones[i]];
+      if (s) { s[0] += i % MAP_W; s[1] += Math.floor(i / MAP_W); s[2]++; }
+    }
+    this.goalCenters = {};
+    for (const z of [Z.GOAL_P1, Z.GOAL_P2]) {
+      const [x, y, n] = sum[z];
+      if (n) this.goalCenters[z] = [x / n, y / n];
+    }
+    this.isVersus = Object.keys(this.goalCenters).length === 2;
   }
 
   static async load(path) {
@@ -122,7 +158,15 @@ export class LevelMap {
 
   allowsMove(x, y) {
     const z = this.zoneAt(x, y);
-    return z === Z.MAGENTA || z === Z.BLUE || z === Z.GREEN || z === Z.TEAL || z === Z.YELLOW;
+    return z === Z.MAGENTA || z === Z.BLUE || z === Z.GREEN || z === Z.TEAL || z === Z.YELLOW
+      || z === Z.GOAL_P1 || z === Z.GOAL_P2;
+  }
+
+  // Where dots start. Same as allowsMove, except never inside a player goal
+  // (that would be a free head start). Green keeps the original behavior.
+  allowsSpawn(x, y) {
+    const z = this.zoneAt(x, y);
+    return this.allowsMove(x, y) && z !== Z.GOAL_P1 && z !== Z.GOAL_P2;
   }
 
   isWall(x, y) {

@@ -2,13 +2,13 @@
 // (menu, tutorial intro, play, level select, high scores, win screen, and
 // the multiplayer lobby/join screens).
 //
-// Multiplayer is co-op and host-authoritative: the host runs the only World
-// and feeds it both players' force sources; the guest sends its pointer
-// input and draws the snapshots the host streams back.
+// Multiplayer (co-op or versus) is host-authoritative: the host runs the only
+// World and feeds it both players' force sources; the guest sends its
+// pointer input and draws the snapshots the host streams back.
 
 import {
   MAP_W, MAP_H, LEVEL_COUNT, TUTORIAL_COUNT, TICK_HZ, TICK_MS, MAX_TICKS_PER_FRAME,
-  computeStars,
+  computeStars, PLAYER_NAMES, VERSUS_MAP_COUNT, VERSUS_MAP_NAMES, Z,
 } from './config.js';
 import { LevelMap } from './map.js';
 import { World } from './physics.js';
@@ -16,7 +16,7 @@ import { PointerSources } from './input.js';
 import { Celebration } from './effects.js';
 import * as store from './storage.js';
 import {
-  text, button, hit, drawWorld, drawSources, drawOverlays, panel, pill, PLAYER_COLORS,
+  text, button, hit, drawWorld, drawSources, drawOverlays, panel, pill, PLAYER_COLORS, FONT,
 } from './render.js';
 import { createTransport } from './net/transport.js';
 import { encodeSnapshot, decodeSnapshot, GuestView } from './net/snapshot.js';
@@ -79,7 +79,7 @@ const S = {
   // menu | intro | loading | play | select | scores | won | error
   // mp | hostLobby | join | connecting | guestLobby | notice
   screen: 'menu',
-  mode: 'level',           // level | tutorial (while playing)
+  mode: 'level',           // level | tutorial | versus (while playing)
   level: 1,
   world: null,             // the simulation (solo and host)
   view: null,              // what the guest draws (GuestView)
@@ -99,7 +99,8 @@ const S = {
 const mapCache = new Map();
 
 async function getMap(mode, level) {
-  const path = `assets/levels/${mode === 'tutorial' ? 'tutorial' : 'level'}${level}.png`;
+  const prefix = mode === 'tutorial' ? 'tutorial' : mode === 'versus' ? 'versus' : 'level';
+  const path = `assets/levels/${prefix}${level}.png`;
   let map = mapCache.get(path);
   if (!map) {
     map = await LevelMap.load(path);
@@ -109,8 +110,12 @@ async function getMap(mode, level) {
 }
 
 function levelLabel(mode, level) {
+  if (mode === 'versus') return `Versus: ${VERSUS_MAP_NAMES[level - 1] || `Map ${level}`}`;
   return mode === 'tutorial' ? `Tutorial ${level}/${TUTORIAL_COUNT}` : `Level ${level}/${LEVEL_COUNT}`;
 }
+
+// Which player this screen is: 0 solo, 1 host (orange), 2 guest (violet).
+const myPlayer = () => (S.net ? (S.net.role === 'host' ? 1 : 2) : 0);
 
 const isHost = () => S.net && S.net.role === 'host';
 const isGuest = () => S.net && S.net.role === 'guest';
@@ -127,7 +132,7 @@ async function loadLevel(mode, level) {
     if (token !== S.loadToken) return; // superseded by another load
     S.mode = mode;
     S.level = level;
-    S.world = new World(map);
+    S.world = new World(map, { versus: mode === 'versus' });
     S.result = null;
     S.screen = 'play';
     input.enabled = true;
@@ -162,7 +167,10 @@ function startTutorial() { S.introPage = 0; S.screen = 'intro'; }
 function nextLevel() {
   if (isGuest()) { S.net.t.sendCtl({ t: 'cmd', c: 'next' }); return; }
   const next = S.level + 1;
-  if (S.mode === 'level') {
+  if (S.mode === 'versus') {
+    // Next map, wrapping around (a rematch while there's only one).
+    loadLevel('versus', next > VERSUS_MAP_COUNT ? 1 : next);
+  } else if (S.mode === 'level') {
     if (next > LEVEL_COUNT) {
       if (!S.net) store.unlockLevelSelect();
       showWon();
@@ -178,6 +186,10 @@ function nextLevel() {
 }
 
 function restartLevel() {
+  // In a networked versus match, restart means rematch: only once it's over,
+  // so nobody can wipe a match they're losing.
+  const w = S.world || S.view;
+  if (S.net && S.mode === 'versus' && w && !w.completed) return;
   if (isGuest()) { S.net.t.sendCtl({ t: 'cmd', c: 'restart' }); return; }
   loadLevel(S.mode, S.level);
 }
@@ -265,8 +277,8 @@ async function hostStart() {
     return;
   }
   if (token !== S.sessionToken) { t.leave(); return; } // cancelled while connecting
-  S.net = { role: 'host', t, room, partner: null, gen: 0, remote: new Map(), copied: false };
-  input.player = 0;
+  S.net = { role: 'host', t, room, partner: null, gen: 0, remote: new Map(), copied: false, matchMode: 'coop' };
+  input.player = 1;
 
   t.onJoin = (peer) => {
     const n = S.net;
@@ -331,7 +343,7 @@ function applyRemoteInput(list) {
     seen.add(id);
     let s = n.remote.get(id);
     if (!s) {
-      s = { id, player: 1, x, y, button: btn === 3 ? 3 : 1, held: false, tap: false };
+      s = { id, player: 2, x, y, button: btn === 3 ? 3 : 1, held: false, tap: false };
       n.remote.set(id, s);
     }
     s.x = x;
@@ -363,7 +375,7 @@ async function guestJoin(rawRoom) {
   }
   if (token !== S.sessionToken) { t.leave(); return; } // cancelled while connecting
   S.net = { role: 'guest', t, room, partner: null, pendingSnap: null, sentEmpty: true };
-  input.player = 1;
+  input.player = 2;
   S.net.timer = setTimeout(() => {
     if (S.net && S.net.t === t && !S.net.partner) {
       failSession(`Couldn't find room ${room}. Check the code, and that the host is still in the lobby.`);
@@ -476,8 +488,11 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'hostLobby': {
       const lv = Number(k);
-      if (lv >= 1 && lv <= LEVEL_COUNT) loadLevel('level', lv);
-      else if (k === 't') loadLevel('tutorial', 1);
+      const versus = S.net && S.net.matchMode === 'versus';
+      if (k === 'm' && S.net) S.net.matchMode = versus ? 'coop' : 'versus';
+      else if (versus && lv >= 1 && lv <= VERSUS_MAP_COUNT) loadLevel('versus', lv);
+      else if (!versus && lv >= 1 && lv <= LEVEL_COUNT) loadLevel('level', lv);
+      else if (!versus && k === 't') loadLevel('tutorial', 1);
       else if (k === 'escape') goMenu();
       break;
     }
@@ -558,8 +573,13 @@ input.onClick((x, y) => {
       else if (hit(b.back, x, y)) goMenu();
       return true;
     case 'hostLobby':
+      if (hit(b.coop, x, y)) { S.net.matchMode = 'coop'; return true; }
+      if (hit(b.versus, x, y)) { S.net.matchMode = 'versus'; return true; }
       for (let i = 1; i <= LEVEL_COUNT; i++) {
         if (hit(b[`lv${i}`], x, y)) { loadLevel('level', i); return true; }
+      }
+      for (let i = 1; i <= VERSUS_MAP_COUNT; i++) {
+        if (hit(b[`vs${i}`], x, y)) { loadLevel('versus', i); return true; }
       }
       if (hit(b.tut, x, y)) loadLevel('tutorial', 1);
       else if (hit(b.copy, x, y)) copyLink();
@@ -590,6 +610,7 @@ input.onClick((x, y) => {
       return true;
     case 'play':
       if (hit(b.next, x, y)) { nextLevel(); return true; }
+      if (hit(b.rematch, x, y)) { restartLevel(); return true; }
       if (hit(b.restart, x, y)) { restartLevel(); return true; }
       if (hit(b.menu, x, y)) { if (isHost()) hostToLobby(); else goMenu(); return true; }
       if (hit(b.touch, x, y)) { input.touchButton = input.touchButton === 1 ? 3 : 1; return true; }
@@ -679,7 +700,8 @@ function draw(now) {
     case 'mp': {
       blank();
       text(ctx, 'Multiplayer', MAP_W / 2, 110, { size: 52, weight: 700 });
-      text(ctx, 'Co-op: both players push, pull and spin the same dots at the same time.', MAP_W / 2, 175, { size: 18, color: '#ccc' });
+      text(ctx, 'Two players push, pull and spin the same dots at the same time.', MAP_W / 2, 165, { size: 18, color: '#ccc' });
+      text(ctx, 'Co-op: share the goal.   Versus: race to fill your own goal.', MAP_W / 2, 192, { size: 18, color: '#ccc' });
       b.host = button(ctx, 'H.  Host a game', MAP_W / 2, 260, { w: 300 });
       b.join = button(ctx, 'J.  Join a game', MAP_W / 2, 325, { w: 300 });
       b.back = button(ctx, 'Back', 80, MAP_H - 40, { w: 120, h: 38, size: 18 });
@@ -707,7 +729,7 @@ function draw(now) {
       blank();
       text(ctx, `Connected to room ${S.net ? S.net.room : ''}`, MAP_W / 2, MAP_H / 2 - 50, { size: 30, weight: 700 });
       text(ctx, 'Waiting for the host to pick a level...', MAP_W / 2, MAP_H / 2, { size: 20, color: '#ccc' });
-      text(ctx, 'You play in orange.', MAP_W / 2, MAP_H / 2 + 36, { size: 18, color: PLAYER_COLORS[1] });
+      text(ctx, 'You play as Violet.', MAP_W / 2, MAP_H / 2 + 36, { size: 18, color: PLAYER_COLORS[2] });
       b.back = button(ctx, 'Leave', MAP_W / 2, MAP_H / 2 + 110, { w: 160, h: 40, size: 18 });
       break;
     case 'notice': {
@@ -798,16 +820,28 @@ function drawHostLobby() {
 
   let status;
   let color;
-  if (n && n.partner) { status = 'Partner connected! They play in orange.'; color = PLAYER_COLORS[1]; }
+  if (n && n.partner) { status = 'Partner connected! You are Orange, they are Violet.'; color = PLAYER_COLORS[2]; }
   else if (n && n.partnerLeft) { status = 'Your partner left. Waiting for someone to join...'; color = 'rgb(255,140,140)'; }
   else { status = 'Waiting for a partner to join... (you can start without them)'; color = '#ccc'; }
   text(ctx, status, MAP_W / 2, 296, { size: 18, color });
 
-  text(ctx, 'Pick a level:', MAP_W / 2, 340, { size: 18, color: '#ccc' });
-  for (let i = 1; i <= LEVEL_COUNT; i++) {
-    b[`lv${i}`] = button(ctx, `${i}`, MAP_W / 2 + (i - 3) * 76, 390, { w: 64, h: 52, size: 24 });
+  const versus = n && n.matchMode === 'versus';
+  b.coop = button(ctx, 'Co-op', MAP_W / 2 - 75, 340, { w: 140, h: 40, size: 18, active: !versus });
+  b.versus = button(ctx, 'Versus', MAP_W / 2 + 75, 340, { w: 140, h: 40, size: 18, active: versus });
+  text(ctx, 'M switches mode', MAP_W / 2, 372, { size: 12, color: '#777' });
+
+  if (versus) {
+    text(ctx, 'Push dots into your own goal. A majority wins outright; otherwise most dots at time wins.', MAP_W / 2, 400, { size: 14, color: '#ccc' });
+    for (let i = 1; i <= VERSUS_MAP_COUNT; i++) {
+      b[`vs${i}`] = button(ctx, `${i}. ${VERSUS_MAP_NAMES[i - 1]}`, MAP_W / 2, 400 + i * 48, { w: 240, h: 42, size: 18 });
+    }
+  } else {
+    text(ctx, 'Pick a level:', MAP_W / 2, 400, { size: 14, color: '#ccc' });
+    for (let i = 1; i <= LEVEL_COUNT; i++) {
+      b[`lv${i}`] = button(ctx, `${i}`, MAP_W / 2 + (i - 3) * 76, 445, { w: 64, h: 50, size: 24 });
+    }
+    b.tut = button(ctx, 'T.  Tutorial', MAP_W / 2, 510, { w: 200, h: 38, size: 17 });
   }
-  b.tut = button(ctx, 'T.  Tutorial', MAP_W / 2, 462, { w: 200, h: 40, size: 18 });
   b.back = button(ctx, 'Leave', 80, MAP_H - 40, { w: 120, h: 38, size: 18 });
 }
 
@@ -825,24 +859,35 @@ function drawPlay(now) {
   const mine = [...input.byId.values()];
   let theirs = [];
   if (isHost()) theirs = [...S.net.remote.values()];
-  else if (guest) theirs = w.sources.filter((s) => s.player !== 1);
+  else if (guest) theirs = w.sources.filter((s) => s.player !== 2);
   drawSources(ctx, theirs.concat(mine));
 
-  const time = (w.tick / TICK_HZ).toFixed(1);
-  pill(ctx, `${levelLabel(S.mode, S.level)}   ${time}s   goal ${Math.round(w.goalFraction() * 100)}%`, 10, 10);
+  if (w.versus) {
+    drawGoalLabels(w);
+    const left = Math.max(0, (w.timeLimitTicks - w.tick) / TICK_HZ);
+    const clock = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
+    drawScoreboard(w, clock);
+  } else {
+    const time = (w.tick / TICK_HZ).toFixed(1);
+    pill(ctx, `${levelLabel(S.mode, S.level)}   ${time}s   goal ${Math.round(w.goalFraction() * 100)}%`, 10, 10);
+  }
   const on = (f) => (f ? 'on' : 'off');
   const esc = isHost() ? 'Esc lobby' : guest ? 'Esc leave' : 'Esc menu';
-  pill(ctx, `V vectors ${on(S.overlays.vectors)}  H div ${on(S.overlays.divergence)}  C curl ${on(S.overlays.curl)}  R restart  ${esc}`,
+  const r = S.net && S.mode === 'versus' ? '' : '  R restart';
+  pill(ctx, `V vectors ${on(S.overlays.vectors)}  H div ${on(S.overlays.divergence)}  C curl ${on(S.overlays.curl)}${r}  ${esc}`,
     10, MAP_H - 40, { size: 13 });
   if (S.net) {
-    const who = S.net.partner ? (guest ? 'Co-op: host is white, you are orange' : 'Co-op: you are white, partner is orange') : 'Waiting for partner';
+    const kind = S.mode === 'versus' ? 'Versus' : 'Co-op';
+    const who = S.net.partner ? `${kind}: you are ${PLAYER_NAMES[myPlayer()]}` : 'Waiting for partner';
     pill(ctx, `${who}  |  room ${S.net.room}`, MAP_W - 10, MAP_H - 40, { size: 13, align: 'right' });
   }
   if (coarsePointer) {
     b.touch = pill(ctx, `Touch: ${input.touchButton === 1 ? 'L (push / CCW)' : 'R (pull / CW)'}`, MAP_W - 10, 10, { size: 16, align: 'right' });
   }
 
-  if (w.completed) {
+  if (w.completed && w.versus) {
+    drawVersusResult(w);
+  } else if (w.completed) {
     panel(ctx);
     const title = S.mode === 'level' ? `Level ${S.level} Complete!` : `Tutorial level ${S.level} Complete!`;
     text(ctx, title, MAP_W / 2, MAP_H / 2 - 70, { size: 44, weight: 700 });
@@ -860,6 +905,61 @@ function drawPlay(now) {
     b.restart = button(ctx, 'R  Restart', MAP_W / 2, MAP_H / 2 + 40);
     b.menu = button(ctx, isHost() ? 'Esc  Lobby' : guest ? 'Esc  Leave' : 'Esc  Menu', MAP_W / 2, MAP_H / 2 + 100);
   }
+}
+
+// Labels over each versus goal so nobody has to guess which is theirs.
+function drawGoalLabels(w) {
+  for (const [z, p] of [[Z.GOAL_P1, 1], [Z.GOAL_P2, 2]]) {
+    const c = w.map.goalCenters[z];
+    if (!c) continue;
+    const me = myPlayer() === p ? ' (you)' : '';
+    const label = `${PLAYER_NAMES[p]} goal${me}`;
+    ctx.font = `700 16px ${FONT}`;
+    const tw = ctx.measureText(label).width + 22;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.roundRect(c[0] - tw / 2, c[1] - 14, tw, 28, 14);
+    ctx.fill();
+    text(ctx, label, c[0], c[1] + 1, { size: 16, weight: 700, color: PLAYER_COLORS[p] });
+  }
+}
+
+// Versus HUD, tucked into the top-left corner so it stays clear of the
+// goals: Orange count | Violet count, then the clock and majority target.
+function drawScoreboard(w, clock) {
+  const x = 10;
+  const y = 10;
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.beginPath();
+  ctx.roundRect(x, y, 176, 58, 12);
+  ctx.fill();
+  text(ctx, `${w.score[1]}`, x + 14, y + 18, { size: 22, weight: 800, color: PLAYER_COLORS[1], align: 'left' });
+  text(ctx, 'vs', x + 88, y + 18, { size: 13, color: '#aaa' });
+  text(ctx, `${w.score[2]}`, x + 162, y + 18, { size: 22, weight: 800, color: PLAYER_COLORS[2], align: 'right' });
+  text(ctx, `${clock}   first to ${w.majority()}`, x + 88, y + 44, { size: 13, color: '#eee' });
+}
+
+function drawVersusResult(w) {
+  const b = S.buttons;
+  panel(ctx);
+  const me = myPlayer();
+  let title;
+  let color;
+  if (w.winner === 3) { title = 'Draw!'; color = '#fff'; }
+  else { title = `${PLAYER_NAMES[w.winner]} wins!`; color = PLAYER_COLORS[w.winner]; }
+  text(ctx, title, MAP_W / 2, MAP_H / 2 - 90, { size: 52, weight: 800, color });
+  if (me && w.winner !== 3) {
+    text(ctx, w.winner === me ? 'You win!' : 'You lose', MAP_W / 2, MAP_H / 2 - 42, { size: 26 });
+  }
+  text(ctx, `${w.score[1]}`, MAP_W / 2 - 60, MAP_H / 2 + 5, { size: 34, weight: 800, color: PLAYER_COLORS[1] });
+  text(ctx, '-', MAP_W / 2, MAP_H / 2 + 5, { size: 34 });
+  text(ctx, `${w.score[2]}`, MAP_W / 2 + 60, MAP_H / 2 + 5, { size: 34, weight: 800, color: PLAYER_COLORS[2] });
+  if (w.winner !== 3) {
+    const how = w.score[w.winner] * 2 > w.n ? 'by majority' : 'on time';
+    text(ctx, how, MAP_W / 2, MAP_H / 2 + 40, { size: 16, color: '#ccc' });
+  }
+  b.rematch = button(ctx, 'R  Rematch', MAP_W / 2, MAP_H / 2 + 95);
+  b.menu = button(ctx, isHost() ? 'Esc  Lobby' : isGuest() ? 'Esc  Leave' : 'Esc  Menu', MAP_W / 2, MAP_H / 2 + 150);
 }
 
 // ---- loop ----------------------------------------------------------------

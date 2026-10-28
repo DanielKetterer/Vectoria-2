@@ -32,6 +32,8 @@ export const Z = {
   GREEN: 5,    // goal: dots stop here
   BLACK: 6,    // wall
   RED: 7,      // trap: dots stop here
+  GOAL_P1: 8,  // versus: player 1 (host, orange) goal; dots stop here
+  GOAL_P2: 9,  // versus: player 2 (guest, violet) goal; dots stop here
 };
 
 export const ZONE_COLORS = [
@@ -42,7 +44,23 @@ export const ZONE_COLORS = [
   [Z.GREEN, [0, 255, 0], 'green.png'],
   [Z.BLACK, [0, 0, 0], 'black.png'],
   [Z.RED, [255, 0, 0], 'red.png'],
+  // Versus goals. These encoding colors sit at least 127 away from every
+  // other zone color in some channel, so they never collide at +/-50. Their
+  // textures are generated (checkered flags in each player's color).
+  [Z.GOAL_P1, [255, 128, 0], null],  // orange
+  [Z.GOAL_P2, [128, 0, 255], null],  // purple
 ];
+
+// Ring/goal colors per player: 0 = solo, 1 = host / player 1, 2 = guest / player 2.
+export const PLAYER_COLORS = ['rgba(255,255,255,0.95)', 'rgb(255,150,40)', 'rgb(175,120,255)'];
+export const PLAYER_NAMES = ['', 'Orange', 'Violet'];
+
+// Versus: dots frozen in your goal are yours. A player wins the moment their
+// goal holds a strict majority of all dots; otherwise the bigger count wins
+// when time runs out.
+export const VERSUS_MAP_COUNT = 1;
+export const VERSUS_MAP_NAMES = ['Open Field'];
+export const VERSUS_TIME_LIMIT_S = 120;
 
 // Star thresholds per level: [3-star under, 2-star under, 1-star under] seconds.
 // The Python game read these from stars.csv, which isn't in the repo, so every

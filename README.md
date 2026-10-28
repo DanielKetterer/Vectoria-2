@@ -35,15 +35,32 @@ The game will be live at `https://danielketterer.github.io/Vectoria-2/` a minute
 
 Beating all five levels unlocks Level Select. Best times, stars and the unlock are saved in the browser's localStorage.
 
-## Multiplayer (co-op)
+## Multiplayer (co-op and versus)
 
 Choose **3. Multiplayer** from the menu.
 
 1. **The host** picks *Host a game*. They get a 4-character room code and an invite link.
 2. **The partner** either opens the invite link, or picks *Join a game* and types the code.
-3. The host picks a level. The host can also start before the partner arrives; a late joiner drops straight into the current level.
+3. The host picks **Co-op** or **Versus** (or presses `M`), then a level or map. The host can also start before the partner arrives; a late joiner drops straight into the current level.
 
-Both players act on the same dots at the same time, and their fields add together. You can see each other's cursors: the host is white and the guest is orange, with **+** for left/push and **-** for right/pull. Either player can press **N** (next) or **R** (restart). Esc returns the host to the lobby and takes the guest out of the game. Co-op runs don't change the solo high scores.
+Both players act on the same dots at the same time, and their fields add together. The host is **Orange** and the guest is **Violet**. You can see each other's cursors as rings in your color, with **+** for left/push and **-** for right/pull. Esc returns the host to the lobby and takes the guest out of the game. Multiplayer runs don't change the solo high scores.
+
+**Co-op:** you share the normal levels and their goal. Either player can press **N** (next) or **R** (restart).
+
+**Versus:** each player has their own goal, and a dot that reaches a goal stays there and counts for that player.
+- A player wins the moment their goal holds a strict majority of all dots.
+- Otherwise, whoever has more when the 2:00 clock runs out wins; equal counts are a draw.
+- Traps just take dots out of play; there's no failure state.
+- Restart is a **rematch**, available to either player, but only once the match is over, so nobody can wipe a match they're losing.
+
+Versus maps live at `assets/levels/versus<N>.png`. Register each one in `VERSUS_MAP_COUNT` / `VERSUS_MAP_NAMES` in `src/config.js`.
+
+The test map, **Open Field** (`versus1.png`), is a teal field (push/pull) inside a wall, with Violet's goal at the top and Orange's at the bottom. It has 398 dots, so 200 wins outright.
+
+Balance note, measured: the fields don't weaken with distance, so one player pulling unopposed from just in front of their own goal reaches a majority in about one second (63 ticks). Real matches turn into a tug of war once both players act, but it's a fast, twitchy game on this map. The levers, if it plays badly, are:
+- distance falloff for versus forces
+- action zones that only cover each player's half
+- goal mouths narrowed by walls
 
 ### How it works without a server
 
@@ -91,8 +108,10 @@ Levels are still flat-color PNGs, so the original level art drops in as-is:
 | green `#00FF00` | goal (dots stop) |
 | black `#000000` | wall |
 | red `#FF0000` | trap (dots stop) |
+| orange `#FF8000` | versus: Orange's goal, player 1 / host (dots stop) |
+| purple `#8000FF` | versus: Violet's goal, player 2 / guest (dots stop) |
 
-Each channel is matched within +/-50. Any other color is passable, has no actions, and spawns no dots.
+Each channel is matched within +/-50. Any other color is passable, has no actions, and spawns no dots. Dots never spawn inside a player goal. The two goal colors are at least 127 away from every other zone color in some channel, so they can't be confused. In-game they're drawn as checkered flags in each player's color, labeled "Orange goal" / "Violet goal", and the player's own goal is marked "(you)".
 
 ## What changed from the pygame version
 
@@ -113,6 +132,6 @@ Star thresholds default to `[2, 5, 10]` seconds for every level. That's what the
 
 ## Ideas not built yet
 
-- **Versus mode.** This needs a second goal color in the level PNGs, one goal per player, plus a new win rule.
+- **More versus maps**, and a balance pass (see the balance note above).
 - **More than two players.** The source list already handles any number of players. The lobby and protocol assume one guest.
 - **The sandbox / level editor** from `combined2.py`.

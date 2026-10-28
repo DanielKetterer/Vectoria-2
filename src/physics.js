@@ -3,8 +3,10 @@
 
 import {
   MAP_W, MAP_H, SAMPLE_STEP, STEP_SIZE, FRICTION, RESTITUTION,
-  WIN_FRACTION, FAIL_FRACTION, Z,
+  WIN_FRACTION, FAIL_FRACTION, Z, TICK_HZ, VERSUS_TIME_LIMIT_S,
 } from './config.js';
+
+const FROZEN = new Set([Z.GREEN, Z.RED, Z.GOAL_P1, Z.GOAL_P2]);
 
 // Unit flow direction at `offset` from a source. Same fields as
 // utils/flow.py: "div" is radial, "curl" is tangential.
@@ -45,13 +47,16 @@ export function fieldAt(resolved, x, y) {
 }
 
 export class World {
-  constructor(map) {
+  // opts.versus: competitive rules (per-player goals, majority or timeout,
+  // no trap-failure). Defaults to whether the map has both player goals.
+  constructor(map, opts = {}) {
     this.map = map;
+    this.versus = opts.versus ?? map.isVersus;
     const xs = [];
     const ys = [];
     for (let x = SAMPLE_STEP / 2; x < MAP_W; x += SAMPLE_STEP) {
       for (let y = SAMPLE_STEP / 2; y < MAP_H; y += SAMPLE_STEP) {
-        if (map.allowsMove(x, y)) {
+        if (map.allowsSpawn(x, y)) {
           xs.push(x);
           ys.push(y);
         }
@@ -69,12 +74,14 @@ export class World {
     this.lastResolved = [];   // most recent sources that applied force (for overlays)
     this.completed = false;
     this.failed = false;
+    this.score = [0, 0, 0];   // versus: dots in [unused, P1 goal, P2 goal]
+    this.winner = 0;          // versus: 0 = playing, 1 / 2 = that player, 3 = draw
+    this.timeLimitTicks = VERSUS_TIME_LIMIT_S * TICK_HZ;
   }
 
   // Is dot i frozen (in a goal or a trap)?
   frozen(i) {
-    const z = this.map.zoneAt(this.px[i], this.py[i]);
-    return z === Z.GREEN || z === Z.RED;
+    return FROZEN.has(this.map.zoneAt(this.px[i], this.py[i]));
   }
 
   // One fixed-rate step. `sources` is the list of player sources; each held
@@ -132,6 +139,11 @@ export class World {
 
     this.tick++;
 
+    if (this.versus) {
+      this.checkVersus();
+      return;
+    }
+
     if (this.hasActed && !this.completed && !this.failed && this.n > 0) {
       let inGoal = 0;
       let trapped = 0;
@@ -143,6 +155,30 @@ export class World {
       if (inGoal / this.n >= WIN_FRACTION) this.completed = true;
       else if (trapped / this.n > FAIL_FRACTION) this.failed = true;
     }
+  }
+
+  // Versus: a strict majority of all dots ends it at once; otherwise the
+  // larger count wins at the time limit (equal = draw). Traps just remove
+  // dots from play; there's no failure state.
+  checkVersus() {
+    if (this.completed) return;
+    let a = 0;
+    let b = 0;
+    for (let i = 0; i < this.n; i++) {
+      const z = this.map.zoneAt(this.px[i], this.py[i]);
+      if (z === Z.GOAL_P1) a++;
+      else if (z === Z.GOAL_P2) b++;
+    }
+    this.score = [0, a, b];
+    if (a * 2 > this.n) this.winner = 1;
+    else if (b * 2 > this.n) this.winner = 2;
+    else if (this.tick >= this.timeLimitTicks) this.winner = a > b ? 1 : b > a ? 2 : 3;
+    if (this.winner) this.completed = true;
+  }
+
+  // Dots a player needs to win outright.
+  majority() {
+    return Math.floor(this.n / 2) + 1;
   }
 
   goalFraction() {
