@@ -70,7 +70,7 @@ Balance note, measured: the fields don't weaken with distance, so one player pul
 
 ### Testing on one machine
 
-Add `?net=local` to the URL. Multiplayer then connects tabs within the same browser using `BroadcastChannel`, with no network involved. Open the host in one tab and the invite link in another.
+Add `?net=local` to the URL. Multiplayer then connects tabs within the same browser using `BroadcastChannel`, with no network involved. Open the host in one tab and the invite link in another. Switching tabs is fine: the simulation clock runs in a Web Worker, so the host keeps simulating while its tab is in the background.
 
 The protocol was tested end to end in headless Chromium two ways:
 

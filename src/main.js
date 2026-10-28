@@ -964,21 +964,52 @@ function drawVersusResult(w) {
 
 // ---- loop ----------------------------------------------------------------
 
+// Simulation and drawing run on separate clocks. Browsers stop
+// requestAnimationFrame in background tabs and throttle main-thread timers
+// there to once a second or slower. If the simulation rode on either, a host
+// whose tab is hidden (e.g. you switched to the guest tab to play Violet, or
+// to a chat app to send the invite link) would freeze the game for both
+// players. A dedicated worker's timer keeps running in a hidden tab, and its
+// messages wake the main thread, so the worker is the simulation clock;
+// animation frames only draw (and also advance the clock when visible, which
+// keeps motion smooth).
+
 let last = performance.now();
 let acc = 0;
 
-function frame(now) {
-  acc += now - last;
+function advance() {
+  const now = performance.now();
+  acc += Math.max(0, now - last);
   last = now;
   if (acc > TICK_MS * MAX_TICKS_PER_FRAME) acc = TICK_MS * MAX_TICKS_PER_FRAME;
   while (acc >= TICK_MS) {
     tick(now);
     acc -= TICK_MS;
   }
-  draw(now);
+}
+
+function frame() {
+  advance();
+  draw(performance.now());
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+function startClock() {
+  try {
+    const src = `setInterval(() => postMessage(0), ${TICK_MS.toFixed(3)});`;
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const worker = new Worker(url);
+    worker.onmessage = advance;
+    return worker;
+  } catch (err) {
+    // No workers (unusual): fall back to a main-thread timer, which still
+    // ticks in a hidden tab, just throttled.
+    console.warn('Worker clock unavailable, using setInterval', err);
+    return setInterval(advance, TICK_MS);
+  }
+}
+startClock();
 
 // An invite link (?join=ABCD) drops straight into the room.
 const inviteRoom = params.get('join');
