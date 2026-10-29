@@ -66,7 +66,7 @@ Balance note, measured: the fields don't weaken with distance, so one player pul
 
 - **Host-authoritative simulation.** The host runs the only simulation and feeds it both players' force sources. The guest sends its pointer input (about 30 times a second, a few dozen bytes each). The host streams back a binary snapshot of the dots (about 30 times a second, roughly 4 KB each). The guest draws those snapshots, smoothing between the last two, and draws its own cursor locally so it feels instant.
 - **Peer-to-peer connection.** Players connect directly over WebRTC data channels. Trystero handles the one-time handshake through public Nostr relays. After that, game traffic goes straight between the two browsers. There's no account, no API key, and no server of our own; GitHub Pages serves the static files.
-- **The one weak spot is restrictive networks.** On some corporate, school or cellular networks, two browsers can't connect directly. That case needs a TURN relay server: add a `turnConfig` to the `joinRoom` call in `src/net/transport.js`. Cloudflare offers TURN with a free tier.
+- **A relay for restrictive networks.** On some cellular, corporate or school networks, and on Wi-Fi that won't route between its own devices, two browsers can't connect directly. For those cases the game uses a TURN relay from Metered's free plan, set by `TURN_CREDENTIALS_URL` in `src/config.js`. Each session fetches short-lived relay credentials from that URL, and traffic only goes through the relay when a direct link fails.
 
 ### Playing both sides on one machine
 
@@ -88,12 +88,9 @@ The connecting screen and the host lobby show a status line, e.g. "Online: 6/8 m
 - **"Couldn't load the online-play library"**: that device can't reach cdn.jsdelivr.net.
 - **"Couldn't reach any of the matchmaking relays"**: that network blocks the public Nostr relays. Try another network.
 - **"Never heard from room ... on the relays"**: the two pages never met. Check the code, and refresh both devices so they run the same version.
-- **"Found room ..., but the two devices couldn't open a direct connection"**: matchmaking worked, but the network blocked the direct WebRTC link. This happens on cellular data, and on Wi-Fi that isolates devices or can't route back to itself. The host lobby shows these failures too. The fix is a TURN relay. To set one up:
-  1. Sign up for Metered's free plan at dashboard.metered.ca.
-  2. Create a TURN credential, then open its details and copy its **API key**. That key is meant for front-end use. Wait about 2 minutes before using it.
-  3. Set `TURN_CREDENTIALS_URL` in `src/config.js` to `https://<your-app>.metered.live/api/v1/turn/credentials?apiKey=<that key>`.
+- **"Found room ..., but the two devices couldn't open a direct connection even through the TURN relay"**: matchmaking worked, but neither the direct link nor the relay got through. The host lobby shows these failures too. The status line should end with "TURN relay on"; if it says "TURN fetch failed", the credentials URL isn't working.
 
-  Traffic only goes through the relay when a direct link fails, so the free allowance goes a long way. Alternatively, paste static entries from any TURN provider into `TURN_SERVERS`.
+The relay is Metered (app `vectoria`, free plan). Its per-credential API key sits in `src/config.js` in public page source, which is what that kind of key is for; the worst case is someone else using up the free quota. To replace the key: in the Metered dashboard, open **TURN Server > Credentials**, delete the old credential, create a new one, copy its API key from **Get credential > Show API Key**, and update `TURN_CREDENTIALS_URL`. A new credential takes about 2 minutes to start working. Static entries from any other TURN provider can go in `TURN_SERVERS` instead.
 
 The protocol was tested end to end in headless Chromium two ways:
 

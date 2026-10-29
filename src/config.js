@@ -104,14 +104,13 @@ export function computeStars(elapsedS, level) {
 // their public address. A TURN server relays the traffic in those cases
 // (it's only used when a direct connection fails, and stays encrypted).
 //
-// Easiest free option: Metered's Open Relay (20 GB/month). Sign up at
-// https://www.metered.ca/tools/openrelay/, create an app, and paste its
-// credentials URL here (it looks like
-// https://<yourapp>.metered.live/api/v1/turn/credentials?apiKey=...).
-// The page fetches short-lived TURN credentials from it when a game starts.
-// The API key is visible in page source; restrict it to your domain in the
-// Metered dashboard.
-export const TURN_CREDENTIALS_URL = '';
+// This uses Metered (free plan). The page fetches short-lived TURN
+// credentials from this URL when a multiplayer session starts. The key is a
+// per-credential key meant for front-end code, so it's fine in page source;
+// the worst case is someone else using up the free quota. If that happens,
+// delete the credential in the Metered dashboard (TURN Server > Credentials),
+// create a new one, and put its key here.
+export const TURN_CREDENTIALS_URL = 'https://vectoria.metered.live/api/v1/turn/credentials?apiKey=950c0fe2467e6ee2c9da4d24d5539e916281';
 
 // Or list TURN servers directly, e.g.
 //   { urls: 'turn:relay.example.com:3478', username: '...', credential: '...' }
