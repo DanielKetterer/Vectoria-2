@@ -27,11 +27,23 @@ The game will be live at `https://danielketterer.github.io/Vectoria-2/` a minute
 |---|---|
 | Left mouse (hold/drag) | Push in Push-Pull zones, counterclockwise spin in Spin zones, push in Both zones |
 | Right mouse (hold/drag) | Pull in Push-Pull zones, clockwise spin in Spin zones, clockwise spin in Both zones |
-| Touch (each finger) | Acts as left or right, chosen by the on-screen L/R toggle (or `T`) |
+| Touch (each finger) | Acts as left (**+**) or right (**-**), chosen on the touch pad (or `T`) |
 | `V` / `H` / `C` | Toggle the vector, divergence and curl overlays |
 | `N` | Next level, after completing one |
 | `R` | Restart |
 | `Esc` / `Q` | Back to menu (in multiplayer: host to lobby, guest leaves) |
+
+### On phones and tablets: the touch pad
+
+Touch devices get a control pad in its own strip beside the field, in the space that would otherwise be black letterbox, so it never covers dots. It's the split from mobile shooters: one thumb picks the action on the pad, the other thumb applies it on the field.
+
+- **+** is the left mouse button: push, or spin counterclockwise. **-** is the right button: pull, or spin clockwise. In yellow (both) zones, + pushes and - spins clockwise, the same as with a mouse.
+- **Tap** + or - to latch it. **Press and hold** the other one for a momentary switch; it reverts when you let go.
+- Switching applies live to fingers already on the field, so you can flip from push to pull mid-drag without lifting.
+- The small buttons cover what the keyboard does: Vectors, Div, Curl, Restart, Menu (Lobby / Leave in multiplayer).
+- **Swap** moves the pad to the other side for left-handed play, and the choice is remembered.
+
+Landscape puts the pad in a column at the screen edge. Portrait puts it in a row under the field, with the field just above it. The pad appears on devices whose main pointer is coarse (a finger). Add `?pad=1` to the URL to force it on, or `?pad=0` to force it off.
 
 Beating all five levels unlocks Level Select. Best times, stars and the unlock are saved in the browser's localStorage.
 
@@ -44,6 +56,8 @@ Choose **3. Multiplayer** from the menu.
 3. The host picks **Co-op** or **Versus** (or presses `M`), then a level or map. The host can also start before the partner arrives; a late joiner drops straight into the current level.
 
 Both players act on the same dots at the same time, and their fields add together. The host is **Orange** and the guest is **Violet**. You can see each other's cursors as rings in your color, with **+** for left/push and **-** for right/pull. Esc returns the host to the lobby and takes the guest out of the game. Multiplayer runs don't change the solo high scores.
+
+**Every multiplayer start counts down 3, 2, 1, GO!**, in both modes, including restarts, rematches and the next level. Nothing moves and the clock doesn't run until GO. You can already hold a finger or button down to be ready, but taps made before GO are dropped. The host counts, and the count rides in every snapshot, so both screens stay in step.
 
 **Co-op:** you share the normal levels and their goal. Either player can press **N** (next) or **R** (restart).
 
@@ -107,6 +121,7 @@ src/config.js       constants (physics, zones, star thresholds)
 src/map.js          PNG -> zone grid + textured render
 src/physics.js      World: dots, flow fields, sources, fixed-step simulation (no DOM)
 src/input.js        Pointer Events -> force sources (mouse, each finger, pen)
+src/pad.js          touch action pad (+/- selector, tools, side swap)
 src/render.js       world, overlays, HUD, buttons
 src/effects.js      win-screen fireworks and confetti
 src/storage.js      localStorage scores and unlock

@@ -3,14 +3,14 @@
 //
 // Layout (all float32):
 //   gen, clock, flags(1=completed, 2=failed, 4=versus), goalFraction,
-//   score1, score2, winner, timeLimitTicks,
+//   score1, score2, winner, timeLimitTicks, countdown (ticks before play starts),
 //   nSources, [x, y, button, player, held] * nSources,
 //   nResolved, [x, y, mode(0=div,1=curl), sign] * nResolved,
 //   nDots, [x, y] * nDots
 
-export function encodeSnapshot(gen, world, sources) {
+export function encodeSnapshot(gen, world, sources, countdown = 0) {
   const res = world.lastResolved;
-  const len = 8 + 1 + sources.length * 5 + 1 + res.length * 4 + 1 + world.n * 2;
+  const len = 9 + 1 + sources.length * 5 + 1 + res.length * 4 + 1 + world.n * 2;
   const f = new Float32Array(len);
   let k = 0;
   f[k++] = gen;
@@ -21,6 +21,7 @@ export function encodeSnapshot(gen, world, sources) {
   f[k++] = world.score[2];
   f[k++] = world.winner;
   f[k++] = world.timeLimitTicks;
+  f[k++] = countdown;
   f[k++] = sources.length;
   for (const s of sources) {
     f[k++] = s.x; f[k++] = s.y; f[k++] = s.button; f[k++] = s.player || 0; f[k++] = s.held ? 1 : 0;
@@ -46,6 +47,7 @@ export function decodeSnapshot(buf) {
   const score = [0, f[k++], f[k++]];
   const winner = f[k++];
   const timeLimitTicks = f[k++];
+  const countdown = f[k++];
   const sources = [];
   const ns = f[k++];
   for (let i = 0; i < ns; i++) {
@@ -64,7 +66,7 @@ export function decodeSnapshot(buf) {
   }
   return {
     gen, clock, completed: (flags & 1) !== 0, failed: (flags & 2) !== 0, versus: (flags & 4) !== 0,
-    goal, score, winner, timeLimitTicks, sources, resolved, n, px, py,
+    goal, score, winner, timeLimitTicks, countdown, sources, resolved, n, px, py,
   };
 }
 
@@ -85,6 +87,8 @@ export class GuestView {
     this.score = [0, 0, 0];
     this.winner = 0;
     this.timeLimitTicks = 0;
+    this.countdown = 0;       // ticks before play starts, from the host
+    this.goAt = -1e9;         // when the countdown hit zero here (GO! flash)
     this.lastResolved = [];
     this.sources = [];
     this.prev = null;
@@ -110,6 +114,8 @@ export class GuestView {
     this.score = snap.score;
     this.winner = snap.winner;
     this.timeLimitTicks = snap.timeLimitTicks;
+    if (this.countdown > 0 && snap.countdown === 0) this.goAt = now;
+    this.countdown = snap.countdown;
     this.lastResolved = snap.resolved;
     this.sources = snap.sources;
     if (this.n !== snap.n) {

@@ -9,10 +9,12 @@
 import {
   MAP_W, MAP_H, LEVEL_COUNT, TUTORIAL_COUNT, TICK_HZ, TICK_MS, MAX_TICKS_PER_FRAME,
   computeStars, PLAYER_NAMES, VERSUS_MAP_COUNT, VERSUS_MAP_NAMES, Z,
+  COUNTDOWN_TICKS, GO_FLASH_MS,
 } from './config.js';
 import { LevelMap } from './map.js';
 import { World } from './physics.js';
 import { PointerSources } from './input.js';
+import { wantsPad, setupPad } from './pad.js';
 import { Celebration } from './effects.js';
 import * as store from './storage.js';
 import {
@@ -34,8 +36,8 @@ resize();
 window.addEventListener('resize', resize);
 
 const input = new PointerSources(canvas);
-const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
 const params = new URLSearchParams(location.search);
+const touchPad = wantsPad(params);
 // Identifies this page to the other player. The same tab can be reachable
 // over two paths (same-browser channel and P2P); this keeps it one player.
 const SESSION_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -56,7 +58,7 @@ const TUTORIAL_PAGES = [
     'Left-click to Counterclockwise SPIN (curl) in Spin zones',
     'Right-click to Clockwise SPIN (curl) in Spin zones',
     '',
-    'On touch screens, the L/R toggle stands in for the mouse buttons',
+    'On touch screens, the + / - pad stands in for the mouse buttons',
     '',
     'Press any key or tap to go to page 2',
   ],
@@ -96,6 +98,8 @@ const S = {
   net: null,              // multiplayer session, see below
   notice: '',
   error: '',
+  countdown: 0,            // multiplayer: ticks left before play starts (host is authoritative)
+  goAt: -1e9,              // when the countdown reached zero (for the GO! flash)
 };
 
 const mapCache = new Map();
@@ -136,6 +140,10 @@ async function loadLevel(mode, level) {
     S.level = level;
     S.world = new World(map, { versus: mode === 'versus' });
     S.result = null;
+    // Every multiplayer start (co-op or versus, including restarts and
+    // rematches) opens with 3-2-1 so both players start together.
+    S.countdown = S.net ? COUNTDOWN_TICKS : 0;
+    S.goAt = -1e9;
     S.screen = 'play';
     input.enabled = true;
     document.title = `Vectoria - ${levelLabel(mode, level)}`;
@@ -153,6 +161,7 @@ async function loadLevel(mode, level) {
 
 function goMenu() {
   S.sessionToken++; // cancels any connect still in flight
+  S.countdown = 0;
   if (S.net) leaveSession();
   hideJoinForm();
   S.screen = 'menu';
@@ -315,6 +324,7 @@ function hostStart() {
 
 function hostToLobby() {
   S.screen = 'hostLobby';
+  S.countdown = 0;
   S.world = null;
   input.enabled = false;
   input.clear();
@@ -328,7 +338,7 @@ function hostToLobby() {
 function sendLoad() {
   const n = S.net;
   if (!n || !n.partner) return;
-  n.t.sendCtl({ t: 'load', gen: n.gen, mode: S.mode, level: S.level }, n.partner);
+  n.t.sendCtl({ t: 'load', gen: n.gen, mode: S.mode, level: S.level, countdown: S.countdown }, n.partner);
 }
 
 // The guest sends its full source list; mirror it into the host's remote map.
@@ -452,6 +462,7 @@ async function guestLoad(m) {
     S.mode = m.mode;
     S.level = m.level;
     S.view = new GuestView(map, m.gen);
+    S.view.countdown = Number(m.countdown) || 0;
     S.world = null;
     S.result = null;
     const p = S.net.pendingSnap;
@@ -541,7 +552,7 @@ window.addEventListener('keydown', (e) => {
       else if (k === 'c' && open) S.overlays.curl = !S.overlays.curl;
       else if (k === 'n' && w.completed) nextLevel();
       else if (k === 'r') restartLevel();
-      else if (k === 't') input.touchButton = input.touchButton === 1 ? 3 : 1;
+      else if (k === 't') input.setTouchButton(input.touchButton === 1 ? 3 : 1);
       else if (k === 'q' || k === 'escape') {
         if (isHost()) hostToLobby(); else goMenu();
       }
@@ -639,7 +650,6 @@ input.onClick((x, y) => {
       if (hit(b.rematch, x, y)) { restartLevel(); return true; }
       if (hit(b.restart, x, y)) { restartLevel(); return true; }
       if (hit(b.menu, x, y)) { if (isHost()) hostToLobby(); else goMenu(); return true; }
-      if (hit(b.touch, x, y)) { input.touchButton = input.touchButton === 1 ? 3 : 1; return true; }
       return false; // let it become a force source
     default:
       return true;
@@ -652,7 +662,26 @@ let tickCount = 0;
 
 function tick(nowMs) {
   tickCount++;
-  if (S.screen === 'play' && S.world) {
+  if (S.screen === 'play' && S.world && S.countdown > 0) {
+    // Host during the countdown: nothing moves and the clock doesn't run.
+    // Fingers already down stay down (so you can be ready at GO), but taps
+    // made before GO are dropped. The guest still gets snapshots, which
+    // carry the countdown, so both screens count together.
+    S.countdown--;
+    if (S.countdown === 0) S.goAt = performance.now();
+    for (const s of input.list()) s.tap = false;
+    input.prune();
+    if (isHost()) {
+      for (const [id, s] of S.net.remote) {
+        s.tap = false;
+        if (!s.held) S.net.remote.delete(id);
+      }
+      if (S.net.partner && tickCount % NET_EVERY === 0) {
+        const held = [...input.byId.values(), ...S.net.remote.values()].filter((s) => s.held);
+        S.net.t.sendSnap(encodeSnapshot(S.net.gen, S.world, held, S.countdown), S.net.partner);
+      }
+    }
+  } else if (S.screen === 'play' && S.world) {
     // Solo or host: the authoritative simulation.
     const w = S.world;
     const wasDone = w.completed;
@@ -664,7 +693,7 @@ function tick(nowMs) {
       for (const [id, s] of S.net.remote) if (!s.held && !s.tap) S.net.remote.delete(id);
       if (S.net.partner && tickCount % NET_EVERY === 0) {
         const held = local.concat([...S.net.remote.values()]).filter((s) => s.held);
-        S.net.t.sendSnap(encodeSnapshot(S.net.gen, w, held), S.net.partner);
+        S.net.t.sendSnap(encodeSnapshot(S.net.gen, w, held, 0), S.net.partner);
       }
     }
     if (w.completed && !wasDone) onComplete();
@@ -899,19 +928,22 @@ function drawPlay(now) {
     const time = (w.clock / TICK_HZ).toFixed(1);
     pill(ctx, `${levelLabel(S.mode, S.level)}   ${time}s   goal ${Math.round(w.goalFraction() * 100)}%`, 10, 10);
   }
-  const on = (f) => (f ? 'on' : 'off');
-  const esc = isHost() ? 'Esc lobby' : guest ? 'Esc leave' : 'Esc menu';
-  const r = S.net && S.mode === 'versus' ? '' : '  R restart';
-  pill(ctx, `V vectors ${on(S.overlays.vectors)}  H div ${on(S.overlays.divergence)}  C curl ${on(S.overlays.curl)}${r}  ${esc}`,
-    10, MAP_H - 40, { size: 13 });
+  if (!touchPad) {
+    // Keyboard hints; on touch devices the pad has these as buttons.
+    const on = (f) => (f ? 'on' : 'off');
+    const esc = isHost() ? 'Esc lobby' : guest ? 'Esc leave' : 'Esc menu';
+    const r = S.net && S.mode === 'versus' ? '' : '  R restart';
+    pill(ctx, `V vectors ${on(S.overlays.vectors)}  H div ${on(S.overlays.divergence)}  C curl ${on(S.overlays.curl)}${r}  ${esc}`,
+      10, MAP_H - 40, { size: 13 });
+  }
   if (S.net) {
     const kind = S.mode === 'versus' ? 'Versus' : 'Co-op';
     const who = S.net.partner ? `${kind}: you are ${PLAYER_NAMES[myPlayer()]}` : 'Waiting for partner';
     pill(ctx, `${who}  |  room ${S.net.room}`, MAP_W - 10, MAP_H - 40, { size: 13, align: 'right' });
   }
-  if (coarsePointer) {
-    b.touch = pill(ctx, `Touch: ${input.touchButton === 1 ? 'L (push / CCW)' : 'R (pull / CW)'}`, MAP_W - 10, 10, { size: 16, align: 'right' });
-  }
+  const cd = guest ? w.countdown : S.countdown;
+  const goAt = guest ? w.goAt : S.goAt;
+  if (cd > 0 || now - goAt < GO_FLASH_MS) drawCountdown(cd, now - goAt);
 
   if (w.completed && w.versus) {
     drawVersusResult(w);
@@ -932,6 +964,38 @@ function drawPlay(now) {
     text(ctx, `Level ${S.level} Failed`, MAP_W / 2, MAP_H / 2 - 30, { size: 44, weight: 700 });
     b.restart = button(ctx, 'R  Restart', MAP_W / 2, MAP_H / 2 + 40);
     b.menu = button(ctx, isHost() ? 'Esc  Lobby' : guest ? 'Esc  Leave' : 'Esc  Menu', MAP_W / 2, MAP_H / 2 + 100);
+  }
+}
+
+// 3, 2, 1, GO! Each number swells in and fades over its second.
+function drawCountdown(ticksLeft, sinceGo) {
+  let label;
+  let frac; // 0 at the start of this number's second, 1 at its end
+  let color = '#fff';
+  if (ticksLeft > 0) {
+    label = String(Math.ceil(ticksLeft / TICK_HZ));
+    frac = 1 - ((ticksLeft - 1) % TICK_HZ + 1) / TICK_HZ;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, MAP_W, MAP_H);
+  } else {
+    label = 'GO!';
+    frac = Math.min(1, sinceGo / GO_FLASH_MS);
+    color = 'rgb(255,215,0)';
+  }
+  const size = Math.round(150 * (1.25 - 0.35 * Math.min(1, frac * 2.5)));
+  ctx.save();
+  ctx.globalAlpha = 1 - 0.75 * frac * frac;
+  ctx.font = `800 ${size}px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+  ctx.strokeText(label, MAP_W / 2, MAP_H / 2);
+  ctx.fillStyle = color;
+  ctx.fillText(label, MAP_W / 2, MAP_H / 2);
+  ctx.restore();
+  if (ticksLeft > 0 && S.net && !S.net.partner && isHost()) {
+    text(ctx, 'Starting without your partner; they can still join', MAP_W / 2, MAP_H / 2 + 110, { size: 16, color: '#ddd' });
   }
 }
 
@@ -1016,9 +1080,31 @@ function advance() {
   }
 }
 
+// Touch pad tools route to the same actions as the keys.
+const syncPad = touchPad ? setupPad(input, (tool) => {
+  if (S.screen !== 'play') return;
+  const w = S.world || S.view;
+  const open = w && !w.completed && !w.failed;
+  if (tool === 'restart') restartLevel();
+  else if (tool === 'exit') { if (isHost()) hostToLobby(); else goMenu(); }
+  else if (open && tool in S.overlays) S.overlays[tool] = !S.overlays[tool];
+}) : null;
+
+function padState() {
+  const w = S.world || S.view;
+  const versusLocked = S.net && S.mode === 'versus' && w && !w.completed;
+  return {
+    playing: S.screen === 'play',
+    overlays: S.overlays,
+    canRestart: S.screen === 'play' && !versusLocked,
+    exitLabel: isHost() ? 'Lobby' : isGuest() ? 'Leave' : 'Menu',
+  };
+}
+
 function frame() {
   advance();
   draw(performance.now());
+  if (syncPad) syncPad(padState());
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -1057,4 +1143,4 @@ if (inviteRoom) {
 }
 
 // Debug/test hook.
-window.__vectoria = { S, input, loadLevel, store };
+window.__vectoria = { S, input, loadLevel, store, touchPad };

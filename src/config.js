@@ -62,6 +62,12 @@ export const VERSUS_MAP_COUNT = 1;
 export const VERSUS_MAP_NAMES = ['Open Field'];
 export const VERSUS_TIME_LIMIT_S = 120;
 
+// Multiplayer start: 3, 2, 1, then a short GO! flash. The host counts and
+// the count rides in every snapshot, so the guest's screen stays in step.
+export const COUNTDOWN_S = 3;
+export const COUNTDOWN_TICKS = COUNTDOWN_S * TICK_HZ;
+export const GO_FLASH_MS = 700;
+
 // Star thresholds per level: [3-star under, 2-star under, 1-star under] seconds.
 // The Python game read these from stars.csv, which isn't in the repo, so every
 // level fell back to [2, 5, 10]. Same default here; edit per level as needed.

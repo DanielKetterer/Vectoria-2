@@ -20,6 +20,8 @@
       /* 800x600 internal resolution, scaled to fit while keeping 4:3 */
       width: min(100vw, calc(100vh * 4 / 3));
       height: min(100vh, calc(100vw * 3 / 4));
+      width: min(100vw, calc(100dvh * 4 / 3));
+      height: min(100dvh, calc(100vw * 3 / 4));
       display: block;
       touch-action: none;          /* no scroll/zoom gestures over the field */
       user-select: none;
@@ -27,6 +29,106 @@
       -webkit-touch-callout: none;
       cursor: crosshair;
     }
+    /* ---- Touch action pad ------------------------------------------------
+       On touch devices the pad takes its own strip beside the field (in the
+       space that would otherwise be black letterbox), so it never covers
+       dots. One thumb picks the action here; the other thumb applies it on
+       the field. Landscape: a column on the left (or right, via Swap).
+       Portrait: a row under the field. */
+    :root {
+      --pad: clamp(132px, 21vw, 210px);
+      --padh: clamp(150px, 26dvh, 230px);
+      --orange: rgb(255, 150, 40);
+    }
+    #pad { display: none; }
+    body.touch #pad {
+      display: flex;
+      box-sizing: border-box;
+      gap: 10px;
+      padding: 10px;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      font: 600 14px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #fff;
+      transition: opacity 0.2s;
+    }
+    body.touch:not(.playing) #pad { opacity: 0.3; pointer-events: none; }
+    #pad button {
+      font: inherit;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      border-radius: 12px;
+      padding: 0;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #pad button:disabled { opacity: 0.35; }
+    #pad .tools {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    #pad .tools button { min-height: 38px; font-size: 13px; }
+    #pad .tools button.on { background: rgba(200, 200, 200, 0.85); color: #000; border-color: #fff; }
+    #pad .actions { display: flex; gap: 10px; flex: 1; }
+    #pad .act {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-height: 64px;
+    }
+    #pad .act b { font-size: 40px; line-height: 1; font-weight: 800; }
+    #pad .act span { font-size: 12px; opacity: 0.85; }
+    #pad .act.on { background: rgb(255, 215, 0); border-color: rgb(255, 215, 0); color: #000; }
+    #pad .act.held { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.7) inset; }
+    /* The pad hugs the screen edge (where the thumb is); the field centers
+       in whatever space is left. */
+    body.touch canvas { margin: auto; }
+    @media (orientation: landscape) {
+      body.touch { flex-direction: row; }
+      body.touch.pad-right { flex-direction: row-reverse; }
+      body.touch canvas {
+        width: min(calc(100vw - var(--pad)), calc(100vh * 4 / 3));
+        height: min(100vh, calc((100vw - var(--pad)) * 3 / 4));
+        width: min(calc(100vw - var(--pad)), calc(100dvh * 4 / 3));
+        height: min(100dvh, calc((100vw - var(--pad)) * 3 / 4));
+      }
+      body.touch #pad {
+        width: var(--pad);
+        height: 100vh;
+        height: 100dvh;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      /* Big buttons at the bottom, where a thumb rests. */
+      #pad .actions { flex-direction: column; flex: 0 1 62%; }
+    }
+    @media (orientation: portrait) {
+      body.touch { flex-direction: column-reverse; }
+      body.touch canvas {
+        width: min(100vw, calc((100vh - var(--padh)) * 4 / 3));
+        height: min(calc(100vh - var(--padh)), calc(100vw * 3 / 4));
+        width: min(100vw, calc((100dvh - var(--padh)) * 4 / 3));
+        height: min(calc(100dvh - var(--padh)), calc(100vw * 3 / 4));
+      }
+      body.touch #pad {
+        width: 100vw;
+        height: var(--padh);
+        flex-direction: row;
+      }
+      body.touch.pad-right #pad { flex-direction: row-reverse; }
+      /* Field sits right above the pad, within reach of the other thumb. */
+      body.touch canvas { margin: auto 0 0; }
+      #pad .tools { grid-template-columns: repeat(2, 1fr); flex: 0 0 38%; align-content: stretch; }
+      #pad .actions { flex: 1; }
+    }
+
     /* Room-code entry: a real input so phone keyboards work. Sits over the canvas. */
     #joinForm {
       position: fixed;
@@ -70,6 +172,20 @@
   </style>
 </head>
 <body>
+  <div id="pad" aria-label="Touch controls">
+    <div class="tools">
+      <button type="button" data-tool="vectors">Vectors</button>
+      <button type="button" data-tool="divergence">Div</button>
+      <button type="button" data-tool="curl">Curl</button>
+      <button type="button" data-tool="restart">Restart</button>
+      <button type="button" data-tool="exit">Menu</button>
+      <button type="button" data-tool="swap">Swap</button>
+    </div>
+    <div class="actions">
+      <button type="button" class="act" data-btn="1"><b>+</b><span>push / spin CCW</span></button>
+      <button type="button" class="act" data-btn="3"><b>-</b><span>pull / spin CW</span></button>
+    </div>
+  </div>
   <canvas id="game" width="800" height="600"></canvas>
   <form id="joinForm" hidden autocomplete="off">
     <input id="joinCode" maxlength="4" inputmode="text" autocapitalize="characters" spellcheck="false" aria-label="Room code" placeholder="ABCD">

@@ -101,6 +101,14 @@ export class PointerSources {
     this.byId.clear();
   }
 
+  // Touch has no right button, so the pad (or the T key) picks what a finger
+  // does. Switching applies live to fingers already on the field, so you can
+  // flip push to pull mid-drag without lifting.
+  setTouchButton(b) {
+    this.touchButton = b === 3 ? 3 : 1;
+    for (const s of this.byId.values()) if (s.kind !== 'mouse') s.button = this.touchButton;
+  }
+
   onClick(fn) {
     this.listeners.push(fn);
   }
