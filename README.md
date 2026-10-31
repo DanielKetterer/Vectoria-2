@@ -71,6 +71,13 @@ Versus maps live at `assets/levels/versus<N>.png`. Register each one in `VERSUS_
 
 The test map, **Open Field** (`versus1.png`), is a teal field (push/pull) inside a wall, with Violet's goal at the top and Orange's at the bottom. It has 398 dots, so 200 wins outright.
 
+**On phones, Open Field takes the shape of the host's screen.** When the host is on a touch device, the field is generated (not loaded from the PNG) to fill the screen beside the touch pad. The short side stays 600 units, the same scale as the levels, so dots and text look the same size, and the long side stretches to fit. The goals go at the two ends of the long axis, so the dots always have the longest possible trip:
+
+- **Landscape phone:** a wide field, with Violet's goal on the left and Orange's on the right. An 844x390 phone gets 1026x600 and 524 dots.
+- **Portrait phone:** a tall field, with Violet's goal at the top and Orange's at the bottom. The score and room tag move to the left edge so they don't cover a goal.
+
+The host sends the field's size with the level, and the guest builds the identical map. If the guest's screen is a different shape, the guest sees the same field letterboxed, so both players always play the same board. A desktop host still uses `versus1.png` at 800x600. The generator is `LevelMap.openField` in `src/map.js`, and it keeps the PNG's proportions: 12 px walls, 60 px deep goals, and a 400 px goal mouth.
+
 Balance note, measured: the fields don't weaken with distance, so one player pulling unopposed from just in front of their own goal reaches a majority in about one second (63 ticks). Real matches turn into a tug of war once both players act, but it's a fast, twitchy game on this map. The levers, if it plays badly, are:
 - distance falloff for versus forces
 - action zones that only cover each player's half

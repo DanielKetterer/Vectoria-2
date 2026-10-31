@@ -67,14 +67,25 @@ export function drawSources(ctx, sources) {
   }
 }
 
-const samplePts = [];
-for (let x = SAMPLE_STEP / 2; x < MAP_W; x += SAMPLE_STEP) {
-  for (let y = SAMPLE_STEP / 2; y < MAP_H; y += SAMPLE_STEP) samplePts.push([x, y]);
+// Overlay sample grid, rebuilt when the map size changes.
+let samplePts = [];
+let sampleKey = '';
+function samplesFor(w, h) {
+  const key = `${w}x${h}`;
+  if (key !== sampleKey) {
+    sampleKey = key;
+    samplePts = [];
+    for (let x = SAMPLE_STEP / 2; x < w; x += SAMPLE_STEP) {
+      for (let y = SAMPLE_STEP / 2; y < h; y += SAMPLE_STEP) samplePts.push([x, y]);
+    }
+  }
+  return samplePts;
 }
 
 // Overlays show the superposed field of the most recent sources that acted.
 export function drawOverlays(ctx, resolved, { vectors, divergence, curl }) {
   if (!resolved.length) return;
+  samplesFor(MAP_W, MAP_H);
   const h = SAMPLE_STEP * 0.5;
 
   if (divergence) {

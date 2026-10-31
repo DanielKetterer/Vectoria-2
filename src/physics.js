@@ -2,7 +2,7 @@
 // this module can later run identically on a networked host or peer.
 
 import {
-  MAP_W, MAP_H, SAMPLE_STEP, STEP_SIZE, FRICTION, RESTITUTION,
+  SAMPLE_STEP, STEP_SIZE, FRICTION, RESTITUTION,
   WIN_FRACTION, FAIL_FRACTION, Z, TICK_HZ, VERSUS_TIME_LIMIT_S,
 } from './config.js';
 
@@ -54,8 +54,8 @@ export class World {
     this.versus = opts.versus ?? map.isVersus;
     const xs = [];
     const ys = [];
-    for (let x = SAMPLE_STEP / 2; x < MAP_W; x += SAMPLE_STEP) {
-      for (let y = SAMPLE_STEP / 2; y < MAP_H; y += SAMPLE_STEP) {
+    for (let x = SAMPLE_STEP / 2; x < map.w; x += SAMPLE_STEP) {
+      for (let y = SAMPLE_STEP / 2; y < map.h; y += SAMPLE_STEP) {
         if (map.allowsSpawn(x, y)) {
           xs.push(x);
           ys.push(y);
@@ -130,8 +130,8 @@ export class World {
       const y = this.py[i];
       const nx = x + this.vx[i];
       const ny = y + this.vy[i];
-      if (nx < 0 || nx >= MAP_W || map.isWall(nx, y)) this.vx[i] *= -RESTITUTION;
-      if (ny < 0 || ny >= MAP_H || map.isWall(x, ny)) this.vy[i] *= -RESTITUTION;
+      if (nx < 0 || nx >= map.w || map.isWall(nx, y)) this.vx[i] *= -RESTITUTION;
+      if (ny < 0 || ny >= map.h || map.isWall(x, ny)) this.vy[i] *= -RESTITUTION;
       this.px[i] += this.vx[i];
       this.py[i] += this.vy[i];
       this.vx[i] *= FRICTION;

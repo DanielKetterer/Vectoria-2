@@ -9,7 +9,7 @@
 import {
   MAP_W, MAP_H, LEVEL_COUNT, TUTORIAL_COUNT, TICK_HZ, TICK_MS, MAX_TICKS_PER_FRAME,
   computeStars, PLAYER_NAMES, VERSUS_MAP_COUNT, VERSUS_MAP_NAMES, Z,
-  COUNTDOWN_TICKS, GO_FLASH_MS,
+  COUNTDOWN_TICKS, GO_FLASH_MS, BASE_W, BASE_H, setViewSize,
 } from './config.js';
 import { LevelMap } from './map.js';
 import { World } from './physics.js';
@@ -25,19 +25,55 @@ import { encodeSnapshot, decodeSnapshot, GuestView } from './net/snapshot.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+const padEl = document.getElementById('pad');
 
+const input = new PointerSources(canvas);
+const params = new URLSearchParams(location.search);
+const touchPad = wantsPad(params);
+
+// Screen area the field can use: the whole window, or the part beside the
+// touch pad (a column in landscape, a row in portrait).
+function availableArea() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (!touchPad) return { w: vw, h: vh };
+  const landscape = window.matchMedia('(orientation: landscape)').matches;
+  return landscape ? { w: vw - padEl.offsetWidth, h: vh } : { w: vw, h: vh - padEl.offsetHeight };
+}
+
+// Backing store at device resolution, and the largest box with the
+// current field's shape that fits the available area.
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(MAP_W * dpr);
   canvas.height = Math.round(MAP_H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const a = availableArea();
+  const s = Math.min(a.w / MAP_W, a.h / MAP_H);
+  canvas.style.width = `${Math.floor(MAP_W * s)}px`;
+  canvas.style.height = `${Math.floor(MAP_H * s)}px`;
 }
-resize();
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
-const input = new PointerSources(canvas);
-const params = new URLSearchParams(location.search);
-const touchPad = wantsPad(params);
+// Switch the canvas's logical size (a screen-shaped Versus field, or back
+// to 800x600 for levels and menus).
+function setView(w, h) {
+  if (w === MAP_W && h === MAP_H) return;
+  setViewSize(w, h);
+  resize();
+}
+
+// Mobile Versus: Open Field is generated in the shape of the host's screen,
+// so it fills the screen. The short side stays 600 (same scale as the
+// levels, so text and dots look the same); the long side stretches.
+function fieldShape() {
+  const a = availableArea();
+  const r = Math.min(2.4, Math.max(1 / 2.4, a.w / Math.max(1, a.h)));
+  return r >= 1 ? { w: Math.round(BASE_H * r), h: BASE_H } : { w: BASE_H, h: Math.round(BASE_H / r) };
+}
+const SHAPED_VERSUS = new Set([1]); // versus maps that can be generated (Open Field)
 // Identifies this page to the other player. The same tab can be reachable
 // over two paths (same-browser channel and P2P); this keeps it one player.
 const SESSION_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -98,13 +134,23 @@ const S = {
   net: null,              // multiplayer session, see below
   notice: '',
   error: '',
+  mapSize: null,           // {w, h} of a generated, screen-shaped Versus field, else null
   countdown: 0,            // multiplayer: ticks left before play starts (host is authoritative)
   goAt: -1e9,              // when the countdown reached zero (for the GO! flash)
 };
 
 const mapCache = new Map();
 
-async function getMap(mode, level) {
+async function getMap(mode, level, size) {
+  if (mode === 'versus' && size && SHAPED_VERSUS.has(level)) {
+    const key = `openField@${size.w}x${size.h}`;
+    let map = mapCache.get(key);
+    if (!map) {
+      map = await LevelMap.openField(size.w, size.h);
+      mapCache.set(key, map);
+    }
+    return map;
+  }
   const prefix = mode === 'tutorial' ? 'tutorial' : mode === 'versus' ? 'versus' : 'level';
   const path = `assets/levels/${prefix}${level}.png`;
   let map = mapCache.get(path);
@@ -133,9 +179,12 @@ async function loadLevel(mode, level) {
   S.screen = 'loading';
   input.enabled = false;
   input.clear();
+  // A phone hosting Versus gets the field in its own screen's shape.
+  const size = mode === 'versus' && touchPad && SHAPED_VERSUS.has(level) ? fieldShape() : null;
   try {
-    const map = await getMap(mode, level);
+    const map = await getMap(mode, level, size);
     if (token !== S.loadToken) return; // superseded by another load
+    S.mapSize = size;
     S.mode = mode;
     S.level = level;
     S.world = new World(map, { versus: mode === 'versus' });
@@ -338,7 +387,11 @@ function hostToLobby() {
 function sendLoad() {
   const n = S.net;
   if (!n || !n.partner) return;
-  n.t.sendCtl({ t: 'load', gen: n.gen, mode: S.mode, level: S.level, countdown: S.countdown }, n.partner);
+  const sz = S.mapSize;
+  n.t.sendCtl({
+    t: 'load', gen: n.gen, mode: S.mode, level: S.level, countdown: S.countdown,
+    w: sz ? sz.w : 0, h: sz ? sz.h : 0,
+  }, n.partner);
 }
 
 // The guest sends its full source list; mirror it into the host's remote map.
@@ -456,8 +509,13 @@ async function guestLoad(m) {
   S.screen = 'loading';
   input.enabled = false;
   input.clear();
+  // The host's field shape, if it sent one (a phone host in Versus). The
+  // guest builds the same map; if its own screen is a different shape, the
+  // field is letterboxed rather than reshaped, so both play the same board.
+  const ok = (v) => Number.isInteger(v) && v >= 200 && v <= 2000;
+  const size = m.mode === 'versus' && ok(m.w) && ok(m.h) ? { w: m.w, h: m.h } : null;
   try {
-    const map = await getMap(m.mode, m.level);
+    const map = await getMap(m.mode, m.level, size);
     if (token !== S.loadToken || !isGuest()) return;
     S.mode = m.mode;
     S.level = m.level;
@@ -739,6 +797,10 @@ function blank() {
 }
 
 function draw(now) {
+  // The canvas takes the shape of whatever is on screen.
+  const live = S.screen === 'play' ? (S.world || S.view) : null;
+  if (live) setView(live.map.w, live.map.h);
+  else setView(BASE_W, BASE_H);
   S.buttons = {};
   const b = S.buttons;
   ctx.clearRect(0, 0, MAP_W, MAP_H);
@@ -919,11 +981,14 @@ function drawPlay(now) {
   else if (guest) theirs = w.sources.filter((s) => s.player !== 2);
   drawSources(ctx, theirs.concat(mine));
 
+  // A tall (portrait) Versus field has its goals at the top and bottom, so
+  // the HUD moves to the left edge, midway down.
+  const tall = w.map.h > w.map.w;
   if (w.versus) {
     drawGoalLabels(w);
     const left = Math.max(0, (w.timeLimitTicks - w.clock) / TICK_HZ);
     const clock = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
-    drawScoreboard(w, clock);
+    drawScoreboard(w, clock, tall);
   } else {
     const time = (w.clock / TICK_HZ).toFixed(1);
     pill(ctx, `${levelLabel(S.mode, S.level)}   ${time}s   goal ${Math.round(w.goalFraction() * 100)}%`, 10, 10);
@@ -939,7 +1004,8 @@ function drawPlay(now) {
   if (S.net) {
     const kind = S.mode === 'versus' ? 'Versus' : 'Co-op';
     const who = S.net.partner ? `${kind}: you are ${PLAYER_NAMES[myPlayer()]}` : 'Waiting for partner';
-    pill(ctx, `${who}  |  room ${S.net.room}`, MAP_W - 10, MAP_H - 40, { size: 13, align: 'right' });
+    if (tall) pill(ctx, `${who}  |  room ${S.net.room}`, 10, MAP_H / 2 + 40, { size: 13 });
+    else pill(ctx, `${who}  |  room ${S.net.room}`, MAP_W - 10, MAP_H - 40, { size: 13, align: 'right' });
   }
   const cd = guest ? w.countdown : S.countdown;
   const goAt = guest ? w.goAt : S.goAt;
@@ -1008,19 +1074,22 @@ function drawGoalLabels(w) {
     const label = `${PLAYER_NAMES[p]} goal${me}`;
     ctx.font = `700 16px ${FONT}`;
     const tw = ctx.measureText(label).width + 22;
+    // Goals at the left/right ends are narrower than the label; keep it on screen.
+    const x = Math.min(Math.max(c[0], tw / 2 + 4), MAP_W - tw / 2 - 4);
+    const y = Math.min(Math.max(c[1], 18), MAP_H - 18);
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.beginPath();
-    ctx.roundRect(c[0] - tw / 2, c[1] - 14, tw, 28, 14);
+    ctx.roundRect(x - tw / 2, y - 14, tw, 28, 14);
     ctx.fill();
-    text(ctx, label, c[0], c[1] + 1, { size: 16, weight: 700, color: PLAYER_COLORS[p] });
+    text(ctx, label, x, y + 1, { size: 16, weight: 700, color: PLAYER_COLORS[p] });
   }
 }
 
 // Versus HUD, tucked into the top-left corner so it stays clear of the
 // goals: Orange count | Violet count, then the clock and majority target.
-function drawScoreboard(w, clock) {
+function drawScoreboard(w, clock, tall) {
   const x = 10;
-  const y = 10;
+  const y = tall ? MAP_H / 2 - 68 : 10;
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.beginPath();
   ctx.roundRect(x, y, 176, 58, 12);
@@ -1089,6 +1158,8 @@ const syncPad = touchPad ? setupPad(input, (tool) => {
   else if (tool === 'exit') { if (isHost()) hostToLobby(); else goMenu(); }
   else if (open && tool in S.overlays) S.overlays[tool] = !S.overlays[tool];
 }) : null;
+
+resize(); // after the pad (if any) is in the layout
 
 function padState() {
   const w = S.world || S.view;

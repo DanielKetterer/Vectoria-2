@@ -18,10 +18,11 @@
     }
     canvas {
       /* 800x600 internal resolution, scaled to fit while keeping 4:3 */
-      width: min(100vw, calc(100vh * 4 / 3));
-      height: min(100vh, calc(100vw * 3 / 4));
-      width: min(100vw, calc(100dvh * 4 / 3));
-      height: min(100dvh, calc(100vw * 3 / 4));
+      /* Sized by fitCanvas() in main.js: the largest box with the current
+         field's shape that fits the screen (beside the pad on touch). */
+      width: 100vw;
+      height: 75vw;
+      flex: none;
       display: block;
       touch-action: none;          /* no scroll/zoom gestures over the field */
       user-select: none;
@@ -93,12 +94,6 @@
     @media (orientation: landscape) {
       body.touch { flex-direction: row; }
       body.touch.pad-right { flex-direction: row-reverse; }
-      body.touch canvas {
-        width: min(calc(100vw - var(--pad)), calc(100vh * 4 / 3));
-        height: min(100vh, calc((100vw - var(--pad)) * 3 / 4));
-        width: min(calc(100vw - var(--pad)), calc(100dvh * 4 / 3));
-        height: min(100dvh, calc((100vw - var(--pad)) * 3 / 4));
-      }
       body.touch #pad {
         width: var(--pad);
         height: 100vh;
@@ -111,12 +106,6 @@
     }
     @media (orientation: portrait) {
       body.touch { flex-direction: column-reverse; }
-      body.touch canvas {
-        width: min(100vw, calc((100vh - var(--padh)) * 4 / 3));
-        height: min(calc(100vh - var(--padh)), calc(100vw * 3 / 4));
-        width: min(100vw, calc((100dvh - var(--padh)) * 4 / 3));
-        height: min(calc(100dvh - var(--padh)), calc(100vw * 3 / 4));
-      }
       body.touch #pad {
         width: 100vw;
         height: var(--padh);

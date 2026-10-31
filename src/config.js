@@ -1,7 +1,17 @@
 // Gameplay constants, ported from vectoria/config.py.
 
-export const MAP_W = 800;
-export const MAP_H = 600;
+// Level PNGs are 800x600. The canvas's logical size (MAP_W x MAP_H) follows
+// whatever map is on screen: 800x600 for the levels and menus, or a
+// screen-shaped size for the generated Versus field on phones. These are live
+// bindings, so every module sees the current size.
+export const BASE_W = 800;
+export const BASE_H = 600;
+export let MAP_W = BASE_W;
+export let MAP_H = BASE_H;
+export function setViewSize(w, h) {
+  MAP_W = w;
+  MAP_H = h;
+}
 
 export const LEVEL_COUNT = 5;
 export const TUTORIAL_COUNT = 2;
