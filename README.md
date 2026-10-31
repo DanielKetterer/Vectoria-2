@@ -67,7 +67,16 @@ Both players act on the same dots at the same time, and their fields add togethe
 - Traps just take dots out of play; there's no failure state.
 - Restart is a **rematch**, available to either player, but only once the match is over, so nobody can wipe a match they're losing.
 
-Versus maps live at `assets/levels/versus<N>.png`. Register each one in `VERSUS_MAP_COUNT` / `VERSUS_MAP_NAMES` in `src/config.js`.
+**Maze** (map 2) is a large maze in the middle of the field, with an open lane all the way around it. The lane is wider in front of each goal, so there's always room to steer dots home.
+
+- **Zones:** the lane is teal (push/pull). The maze floor is yellow, so spin works inside, which helps bend dots around corners.
+- **Construction:** the maze is a random spanning tree with about 18% of its inner walls knocked out to make loops. Every side has doorways, so no dot is ever sealed in. A test checks this on six random mazes.
+- **A fresh maze every match.** The host picks a random seed per match (rematches included) and sends it to the guest, so both build the same maze.
+- **Shape:** like Open Field, the maze is generated at the host's screen shape on phones, and at 800x600 on desktop.
+
+Corridors are 52 px wide, and a desktop Maze has about 295 dots.
+
+Versus maps live at `assets/levels/versus<N>.png`, or are generated in `src/map.js` (see `SHAPED_VERSUS` in `src/main.js`). Register each one in `VERSUS_MAP_COUNT` / `VERSUS_MAP_NAMES` in `src/config.js`.
 
 The test map, **Open Field** (`versus1.png`), is a teal field (push/pull) inside a wall, with Violet's goal at the top and Orange's at the bottom. It has 398 dots, so 200 wins outright.
 
@@ -76,7 +85,14 @@ The test map, **Open Field** (`versus1.png`), is a teal field (push/pull) inside
 - **Landscape phone:** a wide field, with Violet's goal on the left and Orange's on the right. An 844x390 phone gets 1026x600 and 524 dots.
 - **Portrait phone:** a tall field, with Violet's goal at the top and Orange's at the bottom. The score and room tag move to the left edge so they don't cover a goal.
 
-The host sends the field's size with the level, and the guest builds the identical map. If the guest's screen is a different shape, the guest sees the same field letterboxed, so both players always play the same board. A desktop host still uses `versus1.png` at 800x600. The generator is `LevelMap.openField` in `src/map.js`, and it keeps the PNG's proportions: 12 px walls, 60 px deep goals, and a 400 px goal mouth.
+The host sends the field's size with the level, and the guest builds the identical map.
+
+**Each player's view turns to fit their own screen, so mismatched orientations don't matter.** If the field's long axis doesn't match your screen's, your view of it is rotated 90 degrees. Some examples:
+
+- A landscape host and a portrait guest.
+- A desktop host and a phone guest held upright.
+
+It's a rotation, not a mirror, so clockwise spin still looks clockwise, and your touches are mapped back to the shared field. The view turns so your own goal ends up at the bottom on a tall screen, or the left on a wide one. Labels, the score and the countdown stay upright. The view only turns when that makes the field clearly bigger. Turning the phone mid-match re-fits the view, and any fingers that are down are released. A desktop host still uses `versus1.png` at 800x600. The generator is `LevelMap.openField` in `src/map.js`, and it keeps the PNG's proportions: 12 px walls, 60 px deep goals, and a 400 px goal mouth.
 
 Balance note, measured: the fields don't weaken with distance, so one player pulling unopposed from just in front of their own goal reaches a majority in about one second (63 ticks). Real matches turn into a tug of war once both players act, but it's a fast, twitchy game on this map. The levers, if it plays badly, are:
 - distance falloff for versus forces

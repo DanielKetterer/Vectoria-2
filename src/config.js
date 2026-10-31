@@ -68,8 +68,8 @@ export const PLAYER_NAMES = ['', 'Orange', 'Violet'];
 // Versus: dots frozen in your goal are yours. A player wins the moment their
 // goal holds a strict majority of all dots; otherwise the bigger count wins
 // when time runs out.
-export const VERSUS_MAP_COUNT = 1;
-export const VERSUS_MAP_NAMES = ['Open Field'];
+export const VERSUS_MAP_COUNT = 2;
+export const VERSUS_MAP_NAMES = ['Open Field', 'Maze'];
 export const VERSUS_TIME_LIMIT_S = 120;
 
 // Multiplayer start: 3, 2, 1, then a short GO! flash. The host counts and

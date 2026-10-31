@@ -83,9 +83,9 @@ function samplesFor(w, h) {
 }
 
 // Overlays show the superposed field of the most recent sources that acted.
-export function drawOverlays(ctx, resolved, { vectors, divergence, curl }) {
+export function drawOverlays(ctx, resolved, { vectors, divergence, curl }, mw = MAP_W, mh = MAP_H) {
   if (!resolved.length) return;
-  samplesFor(MAP_W, MAP_H);
+  samplesFor(mw, mh);
   const h = SAMPLE_STEP * 0.5;
 
   if (divergence) {

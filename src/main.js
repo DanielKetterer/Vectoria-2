@@ -57,6 +57,46 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 100));
 if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
+// ---- view rotation ------------------------------------------------------------
+//
+// In Versus the host's screen sets the field's shape, but each player sees
+// it rotated to fit their own screen: if the field's long axis doesn't
+// match the screen's, it's turned 90 degrees. A rotation (not a mirror), so
+// clockwise spin still looks clockwise. Turned so your own goal ends up at
+// the bottom (on a tall screen) or the left (on a wide one).
+//
+// rot: 0 = none, 1 = clockwise, -1 = counterclockwise. World coords are the
+// map's; screen coords are the canvas's logical coords (MAP_W x MAP_H).
+const VIEW = { rot: 0, mw: BASE_W, mh: BASE_H };
+
+function worldToScreen(x, y) {
+  if (VIEW.rot === 1) return [VIEW.mh - y, x];
+  if (VIEW.rot === -1) return [y, VIEW.mw - x];
+  return [x, y];
+}
+function screenToWorld(x, y) {
+  if (VIEW.rot === 1) return [y, VIEW.mh - x];
+  if (VIEW.rot === -1) return [VIEW.mw - y, x];
+  return [x, y];
+}
+input.toWorld = screenToWorld;
+
+function applyWorldTransform() {
+  if (VIEW.rot === 1) { ctx.translate(VIEW.mh, 0); ctx.rotate(Math.PI / 2); }
+  else if (VIEW.rot === -1) { ctx.translate(0, VIEW.mw); ctx.rotate(-Math.PI / 2); }
+}
+
+// Should this screen show the field turned? Only when turning makes it
+// clearly bigger.
+function chooseRotation(map, versus) {
+  if (!versus) return 0;
+  const a = availableArea();
+  const straight = Math.min(a.w / map.w, a.h / map.h);
+  const turned = Math.min(a.w / map.h, a.h / map.w);
+  if (turned <= straight * 1.05) return 0;
+  return myPlayer() === 2 ? -1 : 1;
+}
+
 // Switch the canvas's logical size (a screen-shaped Versus field, or back
 // to 800x600 for levels and menus).
 function setView(w, h) {
@@ -73,7 +113,11 @@ function fieldShape() {
   const r = Math.min(2.4, Math.max(1 / 2.4, a.w / Math.max(1, a.h)));
   return r >= 1 ? { w: Math.round(BASE_H * r), h: BASE_H } : { w: BASE_H, h: Math.round(BASE_H / r) };
 }
-const SHAPED_VERSUS = new Set([1]); // versus maps that can be generated (Open Field)
+// Versus maps that are generated rather than loaded from a PNG, so they can
+// take any shape: 1 Open Field (generated on phones; versus1.png on desktop)
+// and 2 Maze (always generated, a fresh seed every match).
+const SHAPED_VERSUS = new Set([1, 2]);
+const MAZE_LEVEL = 2;
 // Identifies this page to the other player. The same tab can be reachable
 // over two paths (same-browser channel and P2P); this keeps it one player.
 const SESSION_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -141,7 +185,12 @@ const S = {
 
 const mapCache = new Map();
 
-async function getMap(mode, level, size) {
+async function getMap(mode, level, size, seed) {
+  if (mode === 'versus' && level === MAZE_LEVEL) {
+    // Not cached: every match has its own seed.
+    const s = size || { w: BASE_W, h: BASE_H };
+    return LevelMap.maze(s.w, s.h, seed);
+  }
   if (mode === 'versus' && size && SHAPED_VERSUS.has(level)) {
     const key = `openField@${size.w}x${size.h}`;
     let map = mapCache.get(key);
@@ -181,10 +230,12 @@ async function loadLevel(mode, level) {
   input.clear();
   // A phone hosting Versus gets the field in its own screen's shape.
   const size = mode === 'versus' && touchPad && SHAPED_VERSUS.has(level) ? fieldShape() : null;
+  const seed = mode === 'versus' && level === MAZE_LEVEL ? crypto.getRandomValues(new Uint32Array(1))[0] : 0;
   try {
-    const map = await getMap(mode, level, size);
+    const map = await getMap(mode, level, size, seed);
     if (token !== S.loadToken) return; // superseded by another load
     S.mapSize = size;
+    S.mapSeed = seed;
     S.mode = mode;
     S.level = level;
     S.world = new World(map, { versus: mode === 'versus' });
@@ -390,7 +441,7 @@ function sendLoad() {
   const sz = S.mapSize;
   n.t.sendCtl({
     t: 'load', gen: n.gen, mode: S.mode, level: S.level, countdown: S.countdown,
-    w: sz ? sz.w : 0, h: sz ? sz.h : 0,
+    w: sz ? sz.w : 0, h: sz ? sz.h : 0, seed: S.mapSeed || 0,
   }, n.partner);
 }
 
@@ -515,7 +566,8 @@ async function guestLoad(m) {
   const ok = (v) => Number.isInteger(v) && v >= 200 && v <= 2000;
   const size = m.mode === 'versus' && ok(m.w) && ok(m.h) ? { w: m.w, h: m.h } : null;
   try {
-    const map = await getMap(m.mode, m.level, size);
+    const seed = Number.isInteger(m.seed) && m.seed >= 0 ? m.seed : 0;
+    const map = await getMap(m.mode, m.level, size, seed);
     if (token !== S.loadToken || !isGuest()) return;
     S.mode = m.mode;
     S.level = m.level;
@@ -799,8 +851,18 @@ function blank() {
 function draw(now) {
   // The canvas takes the shape of whatever is on screen.
   const live = S.screen === 'play' ? (S.world || S.view) : null;
-  if (live) setView(live.map.w, live.map.h);
-  else setView(BASE_W, BASE_H);
+  if (live) {
+    const rot = chooseRotation(live.map, live.versus);
+    if (rot !== VIEW.rot) input.clear(); // fingers down mid-turn would jump
+    VIEW.rot = rot;
+    VIEW.mw = live.map.w;
+    VIEW.mh = live.map.h;
+    if (rot) setView(live.map.h, live.map.w);
+    else setView(live.map.w, live.map.h);
+  } else {
+    VIEW.rot = 0;
+    setView(BASE_W, BASE_H);
+  }
   S.buttons = {};
   const b = S.buttons;
   ctx.clearRect(0, 0, MAP_W, MAP_H);
@@ -970,8 +1032,11 @@ function drawPlay(now) {
   const b = S.buttons;
   if (!w) return;
   if (guest) w.update(now);
+  ctx.save();
+  applyWorldTransform();
   drawWorld(ctx, w);
-  drawOverlays(ctx, w.lastResolved, S.overlays);
+  drawOverlays(ctx, w.lastResolved, S.overlays, w.map.w, w.map.h);
+  ctx.restore();
 
   // Source rings: your own come straight from the pointer (no lag); the
   // partner's come from the network.
@@ -979,11 +1044,16 @@ function drawPlay(now) {
   let theirs = [];
   if (isHost()) theirs = [...S.net.remote.values()];
   else if (guest) theirs = w.sources.filter((s) => s.player !== 2);
-  drawSources(ctx, theirs.concat(mine));
+  // Rings are drawn upright at their on-screen spot (a rotated "-" would
+  // read as "|").
+  drawSources(ctx, theirs.concat(mine).map((s) => {
+    const [x, y] = worldToScreen(s.x, s.y);
+    return { ...s, x, y };
+  }));
 
   // A tall (portrait) Versus field has its goals at the top and bottom, so
   // the HUD moves to the left edge, midway down.
-  const tall = w.map.h > w.map.w;
+  const tall = MAP_H > MAP_W;
   if (w.versus) {
     drawGoalLabels(w);
     const left = Math.max(0, (w.timeLimitTicks - w.clock) / TICK_HZ);
@@ -1068,8 +1138,9 @@ function drawCountdown(ticksLeft, sinceGo) {
 // Labels over each versus goal so nobody has to guess which is theirs.
 function drawGoalLabels(w) {
   for (const [z, p] of [[Z.GOAL_P1, 1], [Z.GOAL_P2, 2]]) {
-    const c = w.map.goalCenters[z];
-    if (!c) continue;
+    const wc = w.map.goalCenters[z];
+    if (!wc) continue;
+    const c = worldToScreen(wc[0], wc[1]);
     const me = myPlayer() === p ? ' (you)' : '';
     const label = `${PLAYER_NAMES[p]} goal${me}`;
     ctx.font = `700 16px ${FONT}`;
@@ -1214,4 +1285,4 @@ if (inviteRoom) {
 }
 
 // Debug/test hook.
-window.__vectoria = { S, input, loadLevel, store, touchPad };
+window.__vectoria = { S, input, loadLevel, store, touchPad, VIEW, screenToWorld, worldToScreen };

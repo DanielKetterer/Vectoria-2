@@ -12,6 +12,9 @@ export class PointerSources {
     this.enabled = false;
     this.player = 0;         // 0 = solo, 1 = host (orange), 2 = guest (violet)
     this.listeners = [];     // UI click handlers when not in play
+    // Screen (canvas) coordinates -> world coordinates. Identity unless the
+    // field is drawn rotated to fit the screen; main.js sets it.
+    this.toWorld = (x, y) => [x, y];
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -32,9 +35,10 @@ export class PointerSources {
 
   onDown(e) {
     e.preventDefault();
-    const [x, y] = this.toMap(e);
-    for (const fn of this.listeners) if (fn(x, y, e) === true) return;
+    const [sx, sy] = this.toMap(e);
+    for (const fn of this.listeners) if (fn(sx, sy, e) === true) return;
     if (!this.enabled) return;
+    const [x, y] = this.toWorld(sx, sy);
     let button;
     if (e.pointerType === 'mouse') {
       if (e.button === 0) button = 1;
@@ -60,7 +64,7 @@ export class PointerSources {
 
   onMove(e) {
     const s = this.byId.get(e.pointerId);
-    const [x, y] = this.toMap(e);
+    const [x, y] = this.toWorld(...this.toMap(e));
     this.hoverX = x;
     this.hoverY = y;
     if (!s) return;
